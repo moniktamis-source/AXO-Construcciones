@@ -448,6 +448,7 @@
   </div>
   <div style="flex:1"></div>
   <button class="btn btn-sm" style="background:#fff;color:var(--verde);font-weight:700" onclick="showTabPorNombre('proyectos')">🔄 Cambiar proyecto</button>
+  <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="subirTodoNube()" title="Subir todo a la nube">☁ Sincronizar</button>
   <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="axoLogout()" title="Cerrar sesión">🔒 Salir</button>
 </div>
 
@@ -1317,10 +1318,60 @@ async function axoCheckSesion(){
   if(!supa) return;
   try{
     const { data } = await supa.auth.getSession();
-    if(data && data.session){ const l=document.getElementById('axo-login'); if(l) l.style.display='none'; }
+    if(data && data.session){ const l=document.getElementById('axo-login'); if(l) l.style.display='none'; await sincronizarDesdeNube(); }
   }catch(e){}
 }
 window.addEventListener('load', axoCheckSesion);
+
+// ════════════════════════════════════════════════════════
+// SINCRONIZACIÓN con la nube (Supabase)
+// Claves que se sincronizan (datos compartidos de la empresa)
+// ════════════════════════════════════════════════════════
+const CLAVES_SYNC = ['axo_proyectos','axo_gabinete','axo_relevamientos','axo_plantillas'];
+
+// Sube una clave a la nube
+async function subirNube(clave){
+  if(!supa) return;
+  try{
+    const valor = localStorage.getItem(clave);
+    if(valor === null) return;
+    await supa.from('axo_datos').upsert({ clave, valor: JSON.parse(valor), actualizado: new Date().toISOString() });
+  }catch(e){ console.warn('subirNube', clave, e); }
+}
+
+// Sube TODAS las claves de libro de obra (son dinámicas: axo_libro_*)
+async function subirLibrosNube(){
+  if(!supa) return;
+  for(let i=0;i<localStorage.length;i++){
+    const k = localStorage.key(i);
+    if(k && k.startsWith('axo_libro_')){
+      try{ await supa.from('axo_datos').upsert({ clave:k, valor: JSON.parse(localStorage.getItem(k)), actualizado:new Date().toISOString() }); }catch(e){}
+    }
+  }
+}
+
+// Baja todo desde la nube y lo escribe en localStorage
+async function sincronizarDesdeNube(){
+  if(!supa) return;
+  try{
+    const { data, error } = await supa.from('axo_datos').select('clave,valor');
+    if(error){ console.warn('sync error', error); return; }
+    if(data){
+      data.forEach(row=>{
+        try{ localStorage.setItem(row.clave, JSON.stringify(row.valor)); }catch(e){}
+      });
+    }
+  }catch(e){ console.warn('sincronizarDesdeNube', e); }
+}
+
+// Sube todo lo local a la nube (botón manual de respaldo)
+async function subirTodoNube(){
+  if(!supa){ alert('No hay conexión con la nube.'); return; }
+  for(const k of CLAVES_SYNC){ await subirNube(k); }
+  await subirLibrosNube();
+  if(typeof mostrarToastGuardado==='function') mostrarToastGuardado('Datos sincronizados a la nube ☁');
+  else alert('Datos sincronizados a la nube.');
+}
 
 // ════════════════════════════════════════════════════════
 // DATOS BASE
@@ -4959,7 +5010,7 @@ function saveRelevNotasObj(notas){ const r=relevActual(); if(r){ r.notas=notas; 
 
 function setRelevTexto(v){ const n=loadRelevNotas(); n.texto=v; saveRelevNotasObj(n); }
 function setRelevFotoNota(i,v){ const n=loadRelevNotas(); if(n.fotos[i]){ n.fotos[i].nota=v; saveRelevNotasObj(n); } }
-function delRelevFoto(i){ const n=loadRelevNotas(); n.fotos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
+function delRelevFoto(i){ if(!confirm('¿Eliminar esta foto? No se puede recuperar.')) return; const n=loadRelevNotas(); n.fotos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
 
 function comprimirImagen(file, cb){
   const reader=new FileReader();
@@ -5005,7 +5056,7 @@ function subirRelevArchivos(input){
   });
   input.value='';
 }
-function delRelevArchivo(i){ const n=loadRelevNotas(); n.archivos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
+function delRelevArchivo(i){ if(!confirm('¿Eliminar este archivo? No se puede recuperar.')) return; const n=loadRelevNotas(); n.archivos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
 function iconoArchivo(nombre){
   const ext=(nombre.split('.').pop()||'').toLowerCase();
   if(ext==='pdf') return '📕';
@@ -5177,6 +5228,7 @@ function subirFotoEntrada(id,input){
   input.value='';
 }
 function delFotoEntrada(id,i){
+  if(!confirm('¿Eliminar esta foto? No se puede recuperar.')) return;
   const o=getLibro(); const e=(o.entradas||[]).find(x=>x.id===id);
   if(e){ e.fotos.splice(i,1); saveLibro(o); renderLibroObra(); }
 }
@@ -7112,6 +7164,30 @@ document.addEventListener('DOMContentLoaded', () => {
   actualizarProyecto();      // inicializa la barra de proyecto activo
   renderListaProyectos();    // muestra la lista de proyectos guardados al arrancar
 });
+
+// ── Interceptor: cada vez que se guarda una clave sincronizable, sube a la nube ──
+(function(){
+  const _setItem = localStorage.setItem.bind(localStorage);
+  let pendientes = {};
+  let timer = null;
+  localStorage.setItem = function(clave, valor){
+    _setItem(clave, valor);
+    const esSync = CLAVES_SYNC.includes(clave) || (clave && clave.startsWith('axo_libro_'));
+    if(esSync && typeof supa !== 'undefined' && supa){
+      pendientes[clave] = true;
+      clearTimeout(timer);
+      timer = setTimeout(async ()=>{
+        const claves = Object.keys(pendientes); pendientes = {};
+        for(const k of claves){
+          try{
+            const v = localStorage.getItem(k);
+            if(v !== null) await supa.from('axo_datos').upsert({ clave:k, valor:JSON.parse(v), actualizado:new Date().toISOString() });
+          }catch(e){ console.warn('sync up', k, e); }
+        }
+      }, 1500); // espera 1.5s y sube en lote
+    }
+  };
+})();
 </script>
 </body>
 </html>
