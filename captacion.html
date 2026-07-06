@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AXO Construcciones — Contanos tu proyecto</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<!-- Meta Pixel Code -->
+<script>
+!function(f,b,e,v,n,t,s)
+{if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+n.queue=[];t=b.createElement(e);t.async=!0;
+t.src=v;s=b.getElementsByTagName(e)[0];
+s.parentNode.insertBefore(t,s)}(window, document,'script',
+'https://connect.facebook.net/en_US/fbevents.js');
+fbq('init', '3441819799314909');
+fbq('track', 'PageView');
+</script>
+<noscript><img height="1" width="1" style="display:none"
+src="https://www.facebook.com/tr?id=3441819799314909&ev=PageView&noscript=1"
+/></noscript>
+<!-- End Meta Pixel Code -->
+<style>
+  :root{
+    --verde: #4A6741;
+    --verde-osc: #2E4029;
+    --verde-claro: #E8F0E5;
+    --crema: #F6F3EC;
+    --tierra: #A97D4A;
+    --tinta: #262620;
+    --tinta-suave: #6B6A62;
+    --linea: #DAD6C8;
+  }
+  *{ box-sizing:border-box; }
+  body{
+    margin:0; background:var(--crema); color:var(--tinta);
+    font-family:'Inter',sans-serif; line-height:1.55;
+  }
+  .fondo-plano{
+    position:fixed; inset:0; z-index:0; pointer-events:none; opacity:0.5;
+    background-image:
+      linear-gradient(var(--linea) 1px, transparent 1px),
+      linear-gradient(90deg, var(--linea) 1px, transparent 1px);
+    background-size: 42px 42px;
+    mask-image: radial-gradient(circle at 50% 0%, black, transparent 75%);
+  }
+  .envoltorio{ position:relative; z-index:1; max-width:560px; margin:0 auto; padding:52px 20px 70px; }
+  .marca{ display:flex; align-items:center; gap:10px; margin-bottom:38px; }
+  .marca-punto{ width:10px; height:10px; border-radius:50%; background:var(--verde); }
+  .marca-texto{ font-weight:600; letter-spacing:0.03em; font-size:14px; color:var(--verde-osc); }
+
+  h1{
+    font-family:'Fraunces',serif; font-weight:600; font-size:clamp(32px,7vw,44px);
+    line-height:1.08; color:var(--verde-osc); margin:0 0 16px;
+  }
+  .subt{ font-size:16px; color:var(--tinta-suave); max-width:46ch; margin:0 0 34px; }
+
+  .franja{ display:flex; gap:22px; flex-wrap:wrap; margin-bottom:40px; }
+  .franja-item{ font-size:12.5px; color:var(--verde-osc); display:flex; align-items:center; gap:7px; }
+  .franja-item::before{ content:''; width:5px; height:5px; border-radius:50%; background:var(--tierra); flex:none; }
+
+  .tarjeta{
+    background:#fff; border:1px solid var(--linea); border-radius:16px;
+    padding:32px 28px; box-shadow:0 1px 0 rgba(38,38,32,0.03);
+  }
+  .tarjeta h2{
+    font-family:'Fraunces',serif; font-weight:500; font-size:21px; margin:0 0 6px; color:var(--tinta);
+  }
+  .tarjeta .ayuda{ font-size:13.5px; color:var(--tinta-suave); margin:0 0 24px; }
+
+  label{ display:block; font-size:13px; font-weight:500; color:var(--verde-osc); margin-bottom:6px; }
+  .campo{ margin-bottom:18px; }
+  input[type=text], input[type=tel], select, textarea{
+    width:100%; padding:12px 13px; font-size:15px; font-family:'Inter',sans-serif;
+    border:1px solid var(--linea); border-radius:9px; background:#fdfcfa; color:var(--tinta);
+  }
+  input:focus, select:focus, textarea:focus{
+    outline:none; border-color:var(--verde); box-shadow:0 0 0 3px var(--verde-claro);
+  }
+  textarea{ resize:vertical; min-height:80px; }
+  .fila-2{ display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+  @media (max-width:480px){ .fila-2{ grid-template-columns:1fr; } }
+
+  button[type=submit]{
+    width:100%; padding:14px; margin-top:6px; font-size:15.5px; font-weight:600;
+    font-family:'Inter',sans-serif; color:#fff; background:var(--verde);
+    border:none; border-radius:9px; cursor:pointer; transition:background .15s;
+  }
+  button[type=submit]:hover{ background:var(--verde-osc); }
+  button[type=submit]:disabled{ background:#B7C2AF; cursor:default; }
+
+  .error{
+    display:none; background:#FBEAE8; color:#8C2E22; border:1px solid #F0C3BC;
+    border-radius:8px; padding:10px 13px; font-size:13.5px; margin-bottom:16px;
+  }
+  .error.visible{ display:block; }
+
+  .gracias{ display:none; text-align:center; padding:20px 4px 6px; }
+  .gracias.visible{ display:block; }
+  .gracias-marca{
+    width:52px; height:52px; border-radius:50%; background:var(--verde-claro); color:var(--verde-osc);
+    display:flex; align-items:center; justify-content:center; margin:0 auto 18px; font-size:24px;
+  }
+  .gracias h2{ font-family:'Fraunces',serif; font-weight:500; font-size:22px; color:var(--verde-osc); margin:0 0 8px; }
+  .gracias p{ font-size:14.5px; color:var(--tinta-suave); margin:0; }
+
+  footer{ text-align:center; font-size:12px; color:var(--tinta-suave); margin-top:30px; }
+</style>
+</head>
+<body>
+<div class="fondo-plano"></div>
+<div class="envoltorio">
+
+  <div class="marca">
+    <span class="marca-punto"></span>
+    <span class="marca-texto">AXO CONSTRUCCIONES</span>
+  </div>
+
+  <h1>Contanos tu proyecto y te ayudamos a construirlo.</h1>
+  <p class="subt">Planos, construcción, refacción o un proyecto comercial — dejanos tus datos y te escribimos para conversarlo.</p>
+
+  <div class="franja">
+    <span class="franja-item">Garantía de 24 meses</span>
+    <span class="franja-item">Proyectos residenciales y comerciales</span>
+    <span class="franja-item">Lambaré, Paraguay</span>
+  </div>
+
+  <div class="tarjeta">
+    <div id="vista-form">
+      <h2>Dejanos tus datos</h2>
+      <p class="ayuda">Te respondemos a la brevedad por WhatsApp.</p>
+
+      <div id="error-msg" class="error"></div>
+
+      <form id="form-lead">
+        <div class="campo">
+          <label for="f-nombre">Nombre y apellido</label>
+          <input type="text" id="f-nombre" required>
+        </div>
+        <div class="fila-2">
+          <div class="campo">
+            <label for="f-telefono">Teléfono</label>
+            <input type="tel" id="f-telefono" placeholder="0981 123456" required>
+          </div>
+          <div class="campo">
+            <label for="f-ciudad">Ciudad</label>
+            <input type="text" id="f-ciudad">
+          </div>
+        </div>
+        <div class="campo">
+          <label for="f-interes">¿Qué necesitás?</label>
+          <select id="f-interes" required>
+            <option value="" disabled selected>Elegí una opción</option>
+            <option value="Planos municipales">Planos municipales</option>
+            <option value="Construcción/Refacción">Construcción / Refacción</option>
+            <option value="Proyecto residencial">Proyecto residencial</option>
+            <option value="Proyecto Comercial">Proyecto Comercial</option>
+            <option value="Carpeta AFD">Carpeta AFD</option>
+          </select>
+        </div>
+        <div class="campo">
+          <label for="f-comentario">Comentarios <span style="font-weight:400;color:var(--tinta-suave)">(opcional)</span></label>
+          <textarea id="f-comentario" placeholder="Contanos un poco más de tu proyecto, si querés..."></textarea>
+        </div>
+        <button type="submit" id="btn-enviar">Enviar consulta</button>
+      </form>
+    </div>
+
+    <div id="vista-gracias" class="gracias">
+      <div class="gracias-marca">✓</div>
+      <h2>¡Gracias por tu consulta!</h2>
+      <p>Recibimos tus datos. Nos vamos a contactar a la brevedad.</p>
+    </div>
+  </div>
+
+  <footer>AXO Construcciones y Vivienda · Lambaré, Paraguay</footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+  // Misma base y clave pública que usa Sistema AXO (protegida por RLS:
+  // esta página solo puede INSERTAR en axo_leads_web, no leer nada más).
+  const SUPABASE_URL = 'https://uhvfnvqjzrwyriwbqvfu.supabase.co';
+  const SUPABASE_KEY = 'sb_publishable_P71pLzSZflQSHddzvt-90w_uhynN4g6';
+  const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  const form = document.getElementById('form-lead');
+  const btn = document.getElementById('btn-enviar');
+  const errorBox = document.getElementById('error-msg');
+
+  form.addEventListener('submit', async function(e){
+    e.preventDefault();
+    errorBox.classList.remove('visible');
+
+    const datos = {
+      nombre: document.getElementById('f-nombre').value.trim(),
+      telefono: document.getElementById('f-telefono').value.trim(),
+      ciudad: document.getElementById('f-ciudad').value.trim(),
+      interes: document.getElementById('f-interes').value,
+      comentario: document.getElementById('f-comentario').value.trim(),
+      importado: false
+    };
+
+    if (!datos.nombre || !datos.telefono || !datos.interes) {
+      errorBox.textContent = 'Completá nombre, teléfono y qué necesitás para continuar.';
+      errorBox.classList.add('visible');
+      return;
+    }
+
+    btn.disabled = true;
+    btn.textContent = 'Enviando...';
+
+    try {
+      const { error } = await supa.from('axo_leads_web').insert(datos);
+      if (error) throw error;
+      if (typeof fbq === 'function') {
+        fbq('track', 'Lead', { content_name: datos.interes });
+      }
+      document.getElementById('vista-form').style.display = 'none';
+      document.getElementById('vista-gracias').classList.add('visible');
+    } catch (err) {
+      console.error(err);
+      errorBox.textContent = 'No se pudo enviar. Detalle: ' + (err.message || JSON.stringify(err));
+      errorBox.classList.add('visible');
+      btn.disabled = false;
+      btn.textContent = 'Enviar consulta';
+    }
+  });
+</script>
+</body>
+</html>
