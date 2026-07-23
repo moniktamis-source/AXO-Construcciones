@@ -1782,6 +1782,7 @@ async function axoLogin(){
     if(error){ msg.style.color = '#C00'; msg.textContent = 'Email o contrasena incorrectos.'; return; }
     document.getElementById('axo-login').style.display = 'none';
     aplicarRolUsuario(email);
+    if(typeof flushPendientesAntesDeBajar==='function') await flushPendientesAntesDeBajar();
     await sincronizarDesdeNube();
   }catch(e){ msg.style.color = '#C00'; msg.textContent = 'Error al ingresar. Proba de nuevo.'; }
 }
@@ -1798,6 +1799,7 @@ async function axoCheckSesion(){
     if(data && data.session){
       const l=document.getElementById('axo-login'); if(l) l.style.display='none';
       aplicarRolUsuario(data.session.user ? data.session.user.email : '');
+      if(typeof flushPendientesAntesDeBajar==='function') await flushPendientesAntesDeBajar();
       await sincronizarDesdeNube();
       chequearEspacioAuto();
     }
@@ -3225,6 +3227,30 @@ async function subirLibrosNube(){
       try{ await supa.from('axo_datos').upsert({ clave:k, valor: JSON.parse(localStorage.getItem(k)), actualizado:new Date().toISOString() }); }catch(e){}
     }
   }
+}
+
+// Si quedaron cambios guardados localmente que nunca se confirmaron subidos
+// (por ejemplo: se cerró la pestaña o se abrió el sistema en otro dispositivo
+// antes de que terminaran los 1.5s de espera + la subida a la nube), esta
+// función los sube ahora mismo, ANTES de bajar la nube — así sincronizarDesdeNube()
+// no los pisa con la versión vieja. La lista persiste en 'axo_pend_subida' (a
+// diferencia de window.__axoClavesEnVuelo, que es en memoria y se pierde al recargar).
+async function flushPendientesAntesDeBajar(){
+  if(!supa) return;
+  let pend = [];
+  try{ pend = JSON.parse(localStorage.getItem('axo_pend_subida')||'[]'); }catch(e){ pend = []; }
+  if(!pend.length) return;
+  const siguenPendientes = [];
+  for(const k of pend){
+    if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(k);
+    const ok = await subirNube(k);
+    if(ok){
+      if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k);
+    } else {
+      siguenPendientes.push(k); // no se pudo subir todavía: se queda "en vuelo" para que la bajada no la pise
+    }
+  }
+  try{ localStorage.setItem('axo_pend_subida', JSON.stringify(siguenPendientes)); }catch(e){}
 }
 
 // Baja todo desde la nube y lo escribe en localStorage
@@ -13970,18 +13996,38 @@ async function marcarDocumentoDescargado(tipo) {
   let reintentosSeguidos = {}; // clave -> cuántas veces falló seguido
   let avisoMostrado = {};
 
+  // Lista persistida (sobrevive a cerrar la pestaña / abrir otro dispositivo) de
+  // claves guardadas localmente que todavía no se confirmaron subidas a la nube.
+  // La usa flushPendientesAntesDeBajar() al iniciar la sesión para subirlas ANTES
+  // de bajar la nube, y así evitar que una bajada las pise en silencio.
+  function _marcarPendiente(clave){
+    try{
+      const s = new Set(JSON.parse(localStorage.getItem('axo_pend_subida')||'[]'));
+      s.add(clave);
+      _setItem('axo_pend_subida', JSON.stringify([...s]));
+    }catch(e){}
+  }
+  function _desmarcarPendiente(clave){
+    try{
+      const s = new Set(JSON.parse(localStorage.getItem('axo_pend_subida')||'[]'));
+      s.delete(clave);
+      _setItem('axo_pend_subida', JSON.stringify([...s]));
+    }catch(e){}
+  }
+
   async function procesarPendientes(){
     const claves = Object.keys(pendientes); pendientes = {};
     let huboFalla = false;
     for(const k of claves){
       try{
         const v = localStorage.getItem(k);
-        if(v === null){ if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k); continue; }
+        if(v === null){ if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k); _desmarcarPendiente(k); continue; }
         const { error } = await supa.from('axo_datos').upsert({ clave:k, valor:JSON.parse(v), actualizado:new Date().toISOString() });
         if(error) throw error;
         reintentosSeguidos[k] = 0;
         avisoMostrado[k] = false;
         if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k);
+        _desmarcarPendiente(k);
       }catch(e){
         console.warn('sync up', k, e);
         huboFalla = true;
@@ -14006,6 +14052,7 @@ async function marcarDocumentoDescargado(tipo) {
     if(esSync && typeof supa !== 'undefined' && supa){
       pendientes[clave] = true;
       if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(clave);
+      _marcarPendiente(clave);
       clearTimeout(timer);
       timer = setTimeout(procesarPendientes, 1500); // espera 1.5s y sube en lote
     }
