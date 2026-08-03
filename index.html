@@ -11752,6 +11752,25 @@ function panelPendientesLibro(){
 // Links para el residente — uno por obra, todos juntos
 // Con varias obras andando hace falta verlos en una sola lista: si solo se
 // muestra el de la obra abierta, hay que entrar a cada una para copiarlo.
+// ── Lista pública de obras, para el link genérico ──────────
+// SOLO nombres: cliente y trabajo. Nunca precios, cantidades ni presupuestos.
+// obra.html la lee con la clave anónima, así que todo lo que se publique acá
+// queda al alcance de cualquiera que tenga el link. Por eso va bajo la clave
+// 'informe_...', que es el único prefijo que el rol anónimo puede leer.
+const CLAVE_OBRAS_PUBLICAS = 'informe_obras_activas';
+
+async function publicarObrasActivas(lista){
+  if (typeof supa === 'undefined' || !supa) return;
+  const publico = (lista || []).map(o => ({ c: o.cliente || '', p: o.proyecto || '' }));
+  try {
+    await supa.from('axo_datos').upsert({
+      clave: CLAVE_OBRAS_PUBLICAS,
+      valor: publico,
+      actualizado: new Date().toISOString()
+    });
+  } catch(e) { console.warn('[Obras públicas] no se pudo publicar la lista:', e && e.message); }
+}
+
 function urlObraResidente(cliente, proyecto){
   const base = location.href.replace(/[^/]*$/, '') + 'obra.html?o=' + encodeURIComponent(proyecto || '');
   return (cliente || '').trim() ? (base + '&c=' + encodeURIComponent(cliente.trim())) : base;
@@ -11798,6 +11817,11 @@ function linkObraResidente(){
   }).sort((a,b) => claveObra(a.cliente,a.proyecto).localeCompare(claveObra(b.cliente,b.proyecto)));
   if (!obras.length) return '';
 
+  // La lista viaja a la nube para que el link genérico sepa qué obras ofrecer
+  publicarObrasActivas(obras);
+
+  const generico = location.href.replace(/[^/]*$/, '') + 'obra.html';
+
   const filas = obras.map(o => {
     const url = urlObraResidente(o.cliente, o.proyecto);
     const esActual = o.proyecto === actual && o.cliente === cliAct;
@@ -11832,6 +11856,18 @@ function linkObraResidente(){
         y el ícono queda con el nombre de esa obra.
       </div>
       <table class="tbl" style="width:100%"><tbody>${filas}</tbody></table>
+      <div style="padding:11px 14px;border-top:2px solid #eee;background:#FAFAFA">
+        <div style="font-size:12px;font-weight:600;color:#4A6741;margin-bottom:5px">🌐 Link único para todas las obras</div>
+        <div style="font-size:11px;color:#666;margin-bottom:7px">
+          Un solo ícono en el celular: al abrirlo elige de una lista a qué obra carga, y queda recordada.
+          Cómodo si el residente pasa por varias obras. A cambio, el riesgo es que un día no mire bien y cargue en la equivocada.
+        </div>
+        <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap">
+          <input readonly value="${generico}" onclick="this.select()" style="flex:1;min-width:190px;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:10.5px;background:#fff;color:#666">
+          <button class="btn btn-outline btn-sm" onclick="copiarAlPortapapeles('${generico}',this,'✅')">📋</button>
+          <a href="https://wa.me/?text=${encodeURIComponent('Carga de obra AXO: ' + generico)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="text-decoration:none">Enviar</a>
+        </div>
+      </div>
     </div></div>`;
 }
 
