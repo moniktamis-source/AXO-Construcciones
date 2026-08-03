@@ -656,6 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.03-b7</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -6445,6 +6446,7 @@ function toggleDiaSemana(dia) {
     lbl.style.background = checked ? 'var(--verdel)' : '#fff';
   }
   actualizarCalendario();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function esDiaLaboral(fecha) {
@@ -6665,6 +6667,7 @@ function agregarFeriado() {
   document.getElementById('cal-feriado-desc').value = '';
   renderFeriadosLista();
   actualizarCalendario();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function cargarFeriadosParaguay() {
@@ -6677,6 +6680,7 @@ function cargarFeriadosParaguay() {
   });
   renderFeriadosLista();
   actualizarCalendario();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function eliminarFeriado(fecha) {
@@ -6684,6 +6688,7 @@ function eliminarFeriado(fecha) {
   calConfig.feriadosData = (calConfig.feriadosData || []).filter(f => f.fecha !== fecha);
   renderFeriadosLista();
   actualizarCalendario();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function renderFeriadosLista() {
@@ -6714,6 +6719,7 @@ function actualizarPlazo() {
   if (calDiasEl) calDiasEl.value = dias;
   actualizarCalendario();
   recalcular();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 // Categorías con cantidad cargada (o subcontrato con costo), en el orden natural de obra.
@@ -6799,6 +6805,7 @@ function generarCronograma() {
   recalcularSecuenciaCronograma(true); // aplica fechas fijas/dependencias ya configuradas, si hay
   sincronizarPlazoConCronograma(); // por si las dependencias estiraron el total más todavía
   renderGantt();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 // Ajusta el Cronograma Oferta YA generado para que el total de días hábiles coincida
@@ -7380,6 +7387,7 @@ function fijarDuracionSeleccionCrono(valStr) {
     if (cronograma[cod]) { cronograma[cod].duracionDias = val; cronograma[cod]._durManual = true; }
   });
   recalcularSecuenciaCronograma();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 function renderSeleccionCronoToolbar() {
   const congelado = (estadoProyecto === 'aprobado' || estadoProyecto === 'finalizado');
@@ -10159,24 +10167,54 @@ function pdfCertificacion(tipo) {
 // FLUJO DE CAJA — por etapa: cobros (manual) vs egresos (auto)
 // ════════════════════════════════════════════════════════
 function egresosPorEtapa() {
-  // Suma egresos reales (comprado + certificado) por etapa
+  // Egreso REAL por etapa. Es la única definición: la usan el Flujo de Caja,
+  // el Dashboard del proyecto y el Dashboard global. Si cada uno sumara a su
+  // manera, los tres mostrarían números distintos de la misma obra.
+  //
+  // Incluye:
+  //   · los lotes cargados (compras y certificaciones)
+  //   · los lotes huérfanos, de rubros que después se sacaron del cómputo
+  //   · el saldo de adelantos todavía no amortizado
   const data = calcularNecesidades();
   const eg = { C1:0, C2:0, C3:0, R:0 };
+  const contadas = new Set();
+
+  const sumar = (ekey, pUnit, et) => {
+    contadas.add(ekey);
+    eg[et] += gastoRealEjec(ekey, pUnit);
+  };
+
   ['C1','C2','C3','R'].forEach(et => {
     const d = data[et]; if (!d) return;
     Object.entries(d.mat).forEach(([id,m])=>{
-      const pUnit=precioAdjudicado('mat:'+id)??m.precio;
-      eg[et]+=gastoRealEjec('mat:'+id+'@'+et, pUnit);
+      sumar('mat:'+id+'@'+et, precioAdjudicado('mat:'+id)??m.precio, et);
     });
     Object.entries(d.mo).forEach(([id,m])=>{
-      const pUnit=precioAdjudicado('mo:'+id)??m.precio;
-      eg[et]+=gastoRealEjec('mo:'+id+'@'+et, pUnit);
+      sumar('mo:'+id+'@'+et, precioAdjudicado('mo:'+id)??m.precio, et);
     });
     d.sub.forEach(s=>{
-      const cant=s.cant||1; const pUnit=precioAdjudicado('sub:'+s.cod)??(cant>0?s.costo/cant:0);
-      eg[et]+=gastoRealEjec('sub:'+s.cod+'@'+et, pUnit);
+      const cant=s.cant||1;
+      sumar('sub:'+s.cod+'@'+et, precioAdjudicado('sub:'+s.cod)??(cant>0?s.costo/cant:0), et);
     });
   });
+
+  // Lotes huérfanos: si a un rubro se le puso cantidad 0 después de haberle
+  // cargado compras, su gasto desaparecía de acá — pero la plata ya salió.
+  Object.keys(ejecucion || {}).forEach(ekey => {
+    if (contadas.has(ekey)) return;
+    const et = ekey.split('@')[1];
+    if (!et || eg[et] === undefined) return;
+    const gasto = gastoRealEjec(ekey, 0);
+    if (gasto) eg[et] += gasto;
+  });
+
+  // Adelantos sin amortizar: plata entregada sin trabajo ejecutado. Lo ya
+  // amortizado NO se suma acá, porque viene contado dentro de los lotes.
+  if (typeof saldoAdelantosPorEtapa === 'function') {
+    const adl = saldoAdelantosPorEtapa();
+    ['C1','C2','C3','R'].forEach(et => { eg[et] += (adl[et] || 0); });
+  }
+
   return eg;
 }
 
@@ -10260,12 +10298,8 @@ function renderFlujo() {
     if (m.monto >= 0) manIn[r] += m.monto; else manOut[r] += -m.monto;
   });
 
-  // Adelantos: al flujo se le suma SOLO el saldo sin amortizar. Lo ya
-  // descontado contra certificaciones viene dentro de eg (los lotes), y
-  // sumarlo otra vez inflaría el egreso.
-  const adlEtapa = (typeof saldoAdelantosPorEtapa === 'function') ? saldoAdelantosPorEtapa() : { C1:0,C2:0,C3:0,R:0 };
-  const adlTotal = (adlEtapa.C1||0)+(adlEtapa.C2||0)+(adlEtapa.C3||0)+(adlEtapa.R||0);
-  const egProveedores = (eg.C1||0)+(eg.C2||0)+(eg.C3||0)+(eg.R||0) + adlTotal;   // pagos reales a proveedores + adelantos pendientes
+  // egresosPorEtapa() ya trae los adelantos sin amortizar: no se suman otra vez
+  const egProveedores = (eg.C1||0)+(eg.C2||0)+(eg.C3||0)+(eg.R||0);
 
   // ── TABLA 1: Caja por etapa — Cobro/Costo/Margen iguales a Liquidez ──
   let filasA = '', tPrev=0, tCob=0, tObra=0, tMarg=0;
@@ -10565,6 +10599,38 @@ function renderDashProyecto() {
 // ════════════════════════════════════════════════════════
 // Costo real ejecutado de un proyecto GUARDADO (lee su propio ejecucion/adjudicaciones,
 // sin depender del estado global en memoria — así funciona para obras que no están abiertas).
+// Saldo de adelantos de un proyecto GUARDADO (el de la obra abierta lo
+// calcula estadoAdelantos(), que trabaja sobre las variables en memoria).
+// Misma regla: se amortiza contra lo certificado de ese mismo contratista.
+function saldoAdelantosProyecto(p) {
+  const adelantos = p.adelantos || [];
+  if (!adelantos.length) return 0;
+  const ejec = p.ejecucion || {};
+
+  const cert = {};
+  Object.entries(ejec).forEach(([ekey, e]) => {
+    const tipo = ekey.split(':')[0];
+    if (tipo !== 'mo' && tipo !== 'sub') return;
+    (e.lotes || []).forEach(l => {
+      const prov = (l.prov || '').trim();
+      if (!prov) return;
+      cert[prov] = (cert[prov] || 0) + (parseFloat(l.cant)||0) * (parseFloat(l.precio)||0);
+    });
+  });
+
+  const porProv = {};
+  adelantos.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(ad => {
+    const prov = (ad.prov||'').trim() || '(sin proveedor)';
+    if (!porProv[prov]) porProv[prov] = { disponible: cert[prov] || 0, saldo: 0 };
+    const monto = parseFloat(ad.monto) || 0;
+    const amort = Math.min(monto, Math.max(0, porProv[prov].disponible));
+    porProv[prov].disponible -= amort;
+    porProv[prov].saldo += monto - amort;
+  });
+
+  return Object.values(porProv).reduce((a,p2)=>a+p2.saldo, 0);
+}
+
 function costoRealEjecutadoProyecto(p) {
   const ejec = p.ejecucion || {};
   const adj = p.adjudicaciones || {};
@@ -10584,6 +10650,10 @@ function costoRealEjecutadoProyecto(p) {
       total += (parseFloat(e.val) || 0) * pAdj;
     }
   });
+  // Mismo criterio que egresosPorEtapa(): el adelanto sin amortizar también
+  // es plata que salió. Sin esto, el Dashboard global mostraba menos gasto
+  // que el del proyecto para la misma obra.
+  total += saldoAdelantosProyecto(p);
   return total;
 }
 
@@ -10602,9 +10672,12 @@ function renderDashGlobal() {
     const p = guardados[n] || {};
     const est = p.estadoProyecto || 'no_aprobado';
     cont[est] = (cont[est]||0)+1;
-    // pv y cd: usar snapshot (congelado al aprobar)
+    // pv y cd tienen que salir de la MISMA base. Antes el pv se tomaba de
+    // todos los proyectos y el cd solo de los aprobados (por el snapshot):
+    // el margen global quedaba inflado con la venta de presupuestos que
+    // todavía no eran obra.
     const pv = p.pfGuardado || (p.snapshotAprobado && p.snapshotAprobado.pv) || 0;
-    const cd = (p.snapshotAprobado && p.snapshotAprobado.cd) || 0;
+    const cd = (p.snapshotAprobado && p.snapshotAprobado.cd) || p.cdGuardado || 0;
     const margen = (pv && cd) ? pv - cd : 0;
     const rent = cd > 0 ? Math.round((margen / cd) * 100) : null;
     const costoReal = costoRealEjecutadoProyecto(p);
@@ -10612,7 +10685,11 @@ function renderDashGlobal() {
     const rentReal = costoReal > 0 ? Math.round((margenReal / costoReal) * 100) : null;
     const cobros = p.cobrosReales || {};
     const cobrado = Object.values(cobros).reduce((a,b)=>a+(parseFloat(b)||0),0);
-    gPv += pv; gCobrado += cobrado; gCd += cd; gCostoReal += costoReal;
+    // Los totales de plata cuentan SOLO lo que es obra de verdad. Un presupuesto
+    // sin aprobar es una oferta, no facturación: mezclarlo con lo aprobado da un
+    // número que no sirve para decidir nada.
+    const esObra = (est === 'aprobado' || est === 'finalizado');
+    if (esObra) { gPv += pv; gCobrado += cobrado; gCd += cd; gCostoReal += costoReal; }
     const estLbl = { no_aprobado:'🟡', aprobado:'🟢', finalizado:'⚫' }[est]||'🟡';
     const porCobrar = pv - cobrado;
     const rentTxt = rent!==null ? `<span style="color:${rent>=15?'#2E7D32':'#E65100'};font-weight:600">${rent}%</span>` : '—';
@@ -10620,6 +10697,7 @@ function renderDashGlobal() {
     filas+=`<tr><td style="padding:6px 10px">${estLbl} ${n}</td><td class="num">${pv?fmtN(Math.round(pv)):'—'}</td><td class="num">${cd?fmtN(Math.round(cd)):'—'}</td><td class="num" style="color:#2E7D32">${margen?fmtN(Math.round(margen)):'—'}</td><td class="num center">${rentTxt}</td><td class="num center">${rentRealTxt}</td><td class="num" style="color:#2E7D32">${fmtN(Math.round(cobrado))}</td><td class="num" style="color:${porCobrar>0?'#C05000':'#999'}">${pv?fmtN(Math.round(porCobrar)):'—'}</td></tr>`;
   });
 
+  const nObras = (cont.aprobado||0) + (cont.finalizado||0);
   const gMargen = gPv - gCd;
   const gRent = gCd > 0 ? Math.round((gMargen / gCd) * 100) : null;
   const gMargenReal = gCostoReal > 0 ? gPv - gCostoReal : null;
@@ -10631,15 +10709,20 @@ function renderDashGlobal() {
   tarjetas += tarjeta('🟡 No aprobados', cont.no_aprobado||0, '#C05000');
   tarjetas += tarjeta('⚫ Finalizados', cont.finalizado||0, '#555');
   tarjetas += `</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
-  tarjetas += tarjeta('Venta total (aprob.)', '₲ '+fmtN(Math.round(gPv)), '#1565C0');
-  tarjetas += tarjeta('Margen obras (previsto)', '₲ '+fmtN(Math.round(gMargen)), '#2E7D32');
+  tarjetas += tarjeta('Venta obras aprobadas', '₲ '+fmtN(Math.round(gPv)), '#1565C0');
+  tarjetas += tarjeta('Margen previsto', '₲ '+fmtN(Math.round(gMargen)), '#2E7D32');
   tarjetas += tarjeta('Rentabilidad prevista', gRent!==null?gRent+'%':'—', (gRent!==null&&gRent>=15)?'#2E7D32':'#E65100');
   tarjetas += `</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
   tarjetas += tarjeta('Margen obras (real)', gMargenReal!==null?'₲ '+fmtN(Math.round(gMargenReal)):'—', gMargenReal!==null?(gMargenReal>=gMargen?'#2E7D32':'#E65100'):'#999');
   tarjetas += tarjeta('Rentabilidad real', gRentReal!==null?gRentReal+'%':'—', gRentReal!==null?(gRentReal>=15?'#2E7D32':'#E65100'):'#999');
   tarjetas += tarjeta('Cobrado total', '₲ '+fmtN(Math.round(gCobrado)), '#2E7D32');
   tarjetas += tarjeta('Por cobrar', '₲ '+fmtN(Math.round(gPv-gCobrado)), '#C05000');
-  tarjetas += `</div>`;
+  tarjetas += `</div>
+  <div style="font-size:11.5px;color:#666;background:#F4F7F3;border-left:3px solid #4A6741;border-radius:0 6px 6px 0;padding:8px 11px;margin-bottom:14px">
+    Los montos suman <strong>${nObras} obra(s) aprobadas o finalizadas</strong>.
+    Los ${cont.no_aprobado||0} presupuesto(s) sin aprobar aparecen en la tabla de abajo pero <strong>no suman</strong>:
+    todavía son ofertas, no obra.
+  </div>`;
 
   // ── Resumen Gabinete (solo lo cobrado) ──
   let gab = {}; try{ gab = JSON.parse(localStorage.getItem('axo_gabinete')||'{}'); }catch(e){ gab={}; }
@@ -13552,6 +13635,7 @@ function resetPct() {
   }
   etapasPct = { C1:35, C2:35, C3:25, R:5 };
   recalcular();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 // ════════════════════════════════════════════════════════
@@ -13675,12 +13759,14 @@ function agregarLineaAdicional() {
   });
   renderTablaAdicionales();
   recalcular();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function quitarLineaAdicional(id) {
   adicionales = adicionales.filter(a => a.id !== id);
   renderTablaAdicionales();
   recalcular();
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function renderTablaAdicionales() {
@@ -13885,6 +13971,7 @@ function crearNuevoRubro() {
   document.getElementById('rend-select-rubro').value = nuevoCod;
   renderEditorReceta();
   alert(`Rubro creado: ${nuevoCod} — ${nombre}\nAhora armá su receta abajo.`);
+  autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
 function exportarBancoExcel() {
@@ -14780,26 +14867,60 @@ function guardarBackupsProyectos(obj) {
 function actualizarBotonDeshacer() {
   const btn = document.getElementById('btn-deshacer-guardado');
   if (!btn) return;
-  const backups = getBackupsProyectos();
-  btn.style.display = (proyectoActualNombre && backups[proyectoActualNombre]) ? 'inline-block' : 'none';
+  btn.style.display = (proyectoActualNombre && ultimoBackupProyecto(proyectoActualNombre)) ? 'inline-block' : 'none';
 }
 // Guarda la versión ANTERIOR de un proyecto (la que había antes de sobreescribir), 1 sola versión atrás
+// Antes se guardaba UNA sola versión anterior: si el dato se perdía y después
+// se guardaba otra vez, el respaldo quedaba pisado con la versión vacía y no
+// había vuelta atrás. Ahora se conservan las últimas 5, y solo se agrega una
+// nueva si de verdad cambió algo (si no, cinco guardados seguidos idénticos
+// borraban el historial útil).
+const BACKUPS_POR_PROYECTO = 5;
+
 function backupProyectoAntesDeGuardar(nombre, proyectosActuales) {
   if (!nombre || !proyectosActuales[nombre]) return;
   const backups = getBackupsProyectos();
-  backups[nombre] = proyectosActuales[nombre];
+  const previo = proyectosActuales[nombre];
+
+  let lista = backups[nombre];
+  // Formato viejo: un objeto suelto. Se convierte en lista sin perderlo.
+  if (lista && !Array.isArray(lista)) lista = [lista];
+  if (!Array.isArray(lista)) lista = [];
+
+  try {
+    const firma = JSON.stringify(previo);
+    if (lista.length && JSON.stringify(lista[0]) === firma) return;  // idéntico: no aporta
+  } catch(e) {}
+
+  lista.unshift(previo);
+  if (lista.length > BACKUPS_POR_PROYECTO) lista = lista.slice(0, BACKUPS_POR_PROYECTO);
+  backups[nombre] = lista;
   guardarBackupsProyectos(backups);
   actualizarBotonDeshacer();
 }
+
+// Devuelve la versión anterior más reciente, sea cual sea el formato guardado
+function ultimoBackupProyecto(nombre) {
+  const b = getBackupsProyectos()[nombre];
+  if (!b) return null;
+  return Array.isArray(b) ? (b[0] || null) : b;
+}
 function restaurarVersionAnterior(nombre) {
   const backups = getBackupsProyectos();
-  const backup = backups[nombre];
+  const backup = ultimoBackupProyecto(nombre);
   if (!backup) { alert('No hay una versión anterior guardada de "' + nombre + '".'); return; }
   if (!confirm('¿Restaurar la versión anterior de "' + nombre + '"?\n\nLa versión actual pasa a ser la de respaldo (podés volver a restaurar para deshacer esto).')) return;
   const proyectos = getProyectosGuardados();
   const actual = proyectos[nombre];
   proyectos[nombre] = backup;
-  if (actual) backups[nombre] = actual; else delete backups[nombre];
+  // La versión actual pasa al frente del historial y la restaurada sale de ahí,
+  // así se puede ir y volver sin perder ninguna de las dos
+  let lista = backups[nombre];
+  if (lista && !Array.isArray(lista)) lista = [lista];
+  if (!Array.isArray(lista)) lista = [];
+  lista.shift();
+  if (actual) lista.unshift(actual);
+  if (lista.length) backups[nombre] = lista.slice(0, BACKUPS_POR_PROYECTO); else delete backups[nombre];
   guardarProyectosGuardados(proyectos);
   guardarBackupsProyectos(backups);
   if (proyectoActualNombre === nombre) { aplicarProyectoSerializado(proyectos[nombre]); }
@@ -14856,24 +14977,67 @@ function guardarProyectoRapido() {
 // a guardar a mano. Esta función guarda solo, como Clientes/Proveedores/CRM,
 // y NUNCA pide nombre de proyecto: si todavía no tiene uno asignado, le pone
 // uno automático (cliente — proyecto, o una fecha) para no interrumpir.
+// ════════════════════════════════════════════════════════
+// RED DE SEGURIDAD DEL GUARDADO
+//
+// El autosave espera 400ms antes de escribir, para no guardar en cada tecla.
+// Esa espera abre una ventana chica pero real: si en esos milisegundos se
+// recarga la página (F5, Ctrl+Shift+R) o se cierra la pestaña, el cambio se
+// pierde sin aviso. Y como en la nube queda la versión anterior, al volver a
+// entrar parece que el dato "desapareció solo".
+//
+// Tres defensas:
+//   1. guardarProyectoAhora() — guarda ya, sin esperar
+//   2. beforeunload — antes de cerrar o recargar, vuelca lo pendiente
+//   3. latido cada 45s — si algo quedó sin guardar, se guarda igual
+// ════════════════════════════════════════════════════════
 let __axoAutosaveSeguimientoTimer = null;
-function autosaveSeguimiento() {
+let __axoHayCambiosPendientes = false;
+
+function guardarProyectoAhora(motivo) {
   clearTimeout(__axoAutosaveSeguimientoTimer);
-  __axoAutosaveSeguimientoTimer = setTimeout(() => {
+  __axoAutosaveSeguimientoTimer = null;
+  try {
     if (!proyectoActualNombre) {
       const cli = (document.getElementById('p-cliente')?.value || '').trim();
       const proy = (document.getElementById('p-proyecto')?.value || '').trim();
       const base = [cli, proy].filter(Boolean).join(' — ');
-      proyectoActualNombre = base || ('Proyecto sin nombre ' + new Date().toLocaleDateString('es-PY'));
+      // Sin cliente ni proyecto no hay nada que valga la pena guardar todavía
+      if (!base) { __axoHayCambiosPendientes = false; return false; }
+      proyectoActualNombre = base;
     }
     const proyectos = getProyectosGuardados();
     backupProyectoAntesDeGuardar(proyectoActualNombre, proyectos);
     proyectos[proyectoActualNombre] = serializarProyectoActual();
-    if (guardarProyectosGuardados(proyectos)) {
-      mostrarToastGuardado('Guardado ✓');
-    }
-  }, 400);
+    const ok = guardarProyectosGuardados(proyectos);
+    __axoHayCambiosPendientes = false;
+    if (ok && motivo !== 'silencioso') mostrarToastGuardado('Guardado ✓');
+    return ok;
+  } catch(e) {
+    console.warn('[Guardado] falló:', e);
+    return false;
+  }
 }
+
+function autosaveSeguimiento() {
+  __axoHayCambiosPendientes = true;
+  clearTimeout(__axoAutosaveSeguimientoTimer);
+  __axoAutosaveSeguimientoTimer = setTimeout(() => guardarProyectoAhora(), 400);
+}
+
+// Antes de cerrar o recargar: lo pendiente se guarda sí o sí
+window.addEventListener('beforeunload', () => {
+  if (__axoHayCambiosPendientes) guardarProyectoAhora('silencioso');
+});
+// En el celular la pestaña puede "dormirse" sin disparar beforeunload
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState === 'hidden' && __axoHayCambiosPendientes)
+    guardarProyectoAhora('silencioso');
+});
+// Latido: si algo quedó colgado, se guarda igual
+setInterval(() => {
+  if (__axoHayCambiosPendientes) guardarProyectoAhora('silencioso');
+}, 45000);
 
 // Pequeño aviso visual no intrusivo (no usa alert, para no interrumpir el flujo de trabajo)
 function mostrarToastGuardado(texto) {
