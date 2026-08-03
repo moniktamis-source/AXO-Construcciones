@@ -1,0 +1,288 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>AXO — Carga de obra</title>
+<meta name="theme-color" content="#4A6741">
+<link rel="apple-touch-icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><rect width='100' height='100' fill='%234A6741'/><text y='68' x='50' text-anchor='middle' font-size='54' fill='white' font-family='sans-serif'>A</text></svg>">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --verde:#4A6741; --verde-osc:#2E4029; --verde-claro:#E8F0E5;
+    --crema:#F6F3EC; --tinta:#262620; --tinta-suave:#6B6A62; --linea:#DAD6C8;
+    --naranja:#C05000;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  body{ margin:0; background:var(--crema); color:var(--tinta);
+        font-family:'Inter',sans-serif; line-height:1.5; padding-bottom:env(safe-area-inset-bottom); }
+  .env{ max-width:520px; margin:0 auto; padding:22px 16px 40px; }
+
+  .marca{ display:flex; align-items:center; gap:9px; margin-bottom:18px; }
+  .punto{ width:9px; height:9px; border-radius:50%; background:var(--verde); }
+  .marca span{ font-weight:600; font-size:13px; letter-spacing:.03em; color:var(--verde-osc); }
+
+  h1{ font-family:'Fraunces',serif; font-weight:600; font-size:26px; line-height:1.15;
+      color:var(--verde-osc); margin:0 0 4px; }
+  .obra{ font-size:15px; color:var(--tinta-suave); margin:0 0 22px; }
+  .obra b{ color:var(--verde-osc); }
+
+  .caja{ background:#fff; border:1px solid var(--linea); border-radius:14px; padding:16px; margin-bottom:14px; }
+
+  label.b{ display:block; font-size:13px; font-weight:600; color:var(--verde-osc); margin-bottom:7px; }
+
+  .btn{ display:flex; align-items:center; justify-content:center; gap:9px;
+        width:100%; padding:17px; margin-bottom:10px; font-size:17px; font-weight:600;
+        font-family:'Inter',sans-serif; border-radius:12px; cursor:pointer;
+        border:2px solid var(--verde); background:#fff; color:var(--verde-osc); }
+  .btn:active{ transform:scale(.985); }
+  .btn.lleno{ background:var(--verde); color:#fff; }
+  .btn.lleno:disabled{ background:#9db095; border-color:#9db095; cursor:not-allowed; }
+
+  input[type=date], textarea{
+    width:100%; padding:12px 13px; font-size:16px; font-family:'Inter',sans-serif;
+    border:1px solid var(--linea); border-radius:10px; background:var(--crema); color:var(--tinta); }
+  textarea{ min-height:92px; resize:vertical; }
+  input:focus, textarea:focus{ outline:none; border-color:var(--verde); box-shadow:0 0 0 3px var(--verde-claro); }
+
+  .grilla{ display:flex; gap:8px; flex-wrap:wrap; margin-top:12px; }
+  .item{ position:relative; width:82px; height:82px; border-radius:9px; overflow:hidden; border:1px solid var(--linea); background:#000; }
+  .item img, .item video{ width:100%; height:100%; object-fit:cover; display:block; }
+  .item .x{ position:absolute; top:3px; right:3px; width:23px; height:23px; border-radius:50%;
+            border:2px solid #fff; background:#C62828; color:#fff; font-size:13px; line-height:1;
+            display:flex; align-items:center; justify-content:center; cursor:pointer; }
+  .item .peso{ position:absolute; bottom:0; left:0; right:0; background:rgba(0,0,0,.6);
+               color:#fff; font-size:9px; text-align:center; padding:1px 0; }
+
+  .aviso{ font-size:12.5px; color:var(--tinta-suave); margin-top:9px; }
+  .error{ background:#FDECEA; border:1px solid #F5C6C2; color:#9B2C22;
+          border-radius:10px; padding:11px 13px; font-size:13.5px; margin-bottom:12px; }
+
+  .listo{ text-align:center; padding:34px 16px; }
+  .listo .tilde{ width:58px; height:58px; border-radius:50%; background:var(--verde-claro);
+                 color:var(--verde-osc); font-size:30px; display:flex; align-items:center;
+                 justify-content:center; margin:0 auto 14px; }
+  .listo h2{ font-family:'Fraunces',serif; font-weight:500; font-size:21px; color:var(--verde-osc); margin:0 0 6px; }
+  .listo p{ color:var(--tinta-suave); font-size:14px; margin:0 0 20px; }
+
+  .barra{ height:5px; background:var(--verde-claro); border-radius:3px; overflow:hidden; margin-top:11px; display:none; }
+  .barra i{ display:block; height:100%; width:0; background:var(--verde); transition:width .25s; }
+</style>
+</head>
+<body>
+<div class="env">
+
+  <div class="marca"><span class="punto"></span><span>AXO CONSTRUCCIONES</span></div>
+
+  <div id="app">
+    <h1>Carga del día</h1>
+    <p class="obra">Obra: <b id="nombre-obra">—</b></p>
+
+    <div id="err" class="error" style="display:none"></div>
+
+    <div class="caja">
+      <label class="b">¿Qué día es esto?</label>
+      <input type="date" id="fecha">
+    </div>
+
+    <div class="caja">
+      <label class="b">Fotos y videos</label>
+      <label class="btn">📸 Sacar foto
+        <input type="file" accept="image/*" capture="environment" multiple style="display:none" onchange="agregar(this)">
+      </label>
+      <label class="btn">🎥 Grabar video
+        <input type="file" accept="video/*" capture="environment" style="display:none" onchange="agregar(this)">
+      </label>
+      <label class="btn">🖼️ Elegir del celular <span style="font-weight:400;font-size:13px;color:var(--tinta-suave)">(fotos o videos)</span>
+        <input type="file" accept="image/*,video/*" multiple style="display:none" onchange="agregar(this)">
+      </label>
+      <div class="aviso">Los videos, hasta 1 minuto. Si no hay señal, esperá a tenerla y volvé a intentar.</div>
+      <div class="grilla" id="grilla"></div>
+    </div>
+
+    <div class="caja">
+      <label class="b">¿Qué se hizo hoy? <span style="font-weight:400;color:var(--tinta-suave)">(opcional)</span></label>
+      <textarea id="nota" placeholder="Se terminó la mampostería del frente, falta el dintel…"></textarea>
+    </div>
+
+    <button class="btn lleno" id="enviar" onclick="enviar()">Enviar</button>
+    <div class="barra" id="barra"><i></i></div>
+    <div class="aviso" id="estado"></div>
+  </div>
+
+  <div id="gracias" class="listo" style="display:none">
+    <div class="tilde">✓</div>
+    <h2>Enviado</h2>
+    <p id="resumen-envio"></p>
+    <button class="btn" onclick="location.reload()">Cargar otro día</button>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ═══════════════════════════════════════════════════════════
+// AXO — Carga desde la obra
+//
+// El link lleva el nombre de la obra: obra.html?o=Casa%20Gonzalez
+// Un link fijo por obra, a propósito: si fuera uno solo con lista
+// desplegable, tarde o temprano se carga en la obra equivocada.
+//
+// Sube directo al bucket "libro-obra" y deja una fila en
+// axo_libro_bot. El sistema la levanta como pendiente de revisión.
+// ═══════════════════════════════════════════════════════════
+const SUPABASE_URL = 'https://uhvfnvqjzrwyriwbqvfu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_P71pLzSZflQSHddzvt-90w_uhynN4g6';
+const BUCKET = 'libro-obra';
+const VIDEO_MAX_MB = 25, VIDEO_MAX_SEG = 70;
+
+const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+const params = new URLSearchParams(location.search);
+const OBRA = (params.get('o') || '').trim();
+
+let pendientes = [];   // [{file, tipo, url}]
+
+// ── Arranque ───────────────────────────────────────────────
+(function init(){
+  document.getElementById('fecha').value = new Date().toISOString().slice(0,10);
+  const cont = document.getElementById('nombre-obra');
+  if (!OBRA) {
+    cont.textContent = 'sin definir';
+    mostrarError('Este link no tiene la obra cargada. Pedile a Monica que te reenvíe el link correcto.');
+    document.getElementById('enviar').disabled = true;
+  } else {
+    cont.textContent = OBRA;
+    document.title = 'AXO — ' + OBRA;
+  }
+})();
+
+function mostrarError(t){
+  const e = document.getElementById('err');
+  e.textContent = t; e.style.display = t ? 'block' : 'none';
+}
+const fmtPeso = b => b < 1048576 ? (b/1024).toFixed(0)+' KB' : (b/1048576).toFixed(1)+' MB';
+
+// ── Selección de archivos ──────────────────────────────────
+function agregar(input){
+  const files = Array.from(input.files || []);
+  input.value = '';
+  files.forEach(f => {
+    const esVideo = /^video\//.test(f.type);
+    if (esVideo) {
+      if (f.size > VIDEO_MAX_MB*1048576){
+        mostrarError('El video "'+f.name+'" pesa '+fmtPeso(f.size)+' y el máximo es '+VIDEO_MAX_MB+' MB.');
+        return;
+      }
+      const v = document.createElement('video');
+      v.preload = 'metadata';
+      v.onloadedmetadata = () => {
+        if (v.duration > VIDEO_MAX_SEG){
+          mostrarError('El video dura '+Math.round(v.duration)+' segundos. El máximo es 1 minuto.');
+          URL.revokeObjectURL(v.src);
+        } else {
+          pendientes.push({ file:f, tipo:'vid', url:v.src });
+          pintar();
+        }
+      };
+      v.src = URL.createObjectURL(f);
+    } else {
+      comprimir(f, (blob, url) => { pendientes.push({ file:blob, tipo:'img', url }); pintar(); });
+    }
+  });
+  mostrarError('');
+}
+
+// Misma compresión que usa el sistema: 1000px de lado mayor, calidad 0.6.
+// Una foto de celular pasa de 4 MB a unos 200 KB sin que se note.
+function comprimir(file, cb){
+  const r = new FileReader();
+  r.onload = e => {
+    const img = new Image();
+    img.onload = () => {
+      const max = 1000;
+      let { width:w, height:h } = img;
+      if (w > max || h > max){ const k = Math.min(max/w, max/h); w = Math.round(w*k); h = Math.round(h*k); }
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h;
+      cv.getContext('2d').drawImage(img, 0, 0, w, h);
+      cv.toBlob(b => cb(b, cv.toDataURL('image/jpeg', 0.6)), 'image/jpeg', 0.6);
+    };
+    img.src = e.target.result;
+  };
+  r.readAsDataURL(file);
+}
+
+function pintar(){
+  document.getElementById('grilla').innerHTML = pendientes.map((p,i) =>
+    '<div class="item">' +
+      (p.tipo==='vid'
+        ? '<video src="'+p.url+'" muted></video>'
+        : '<img src="'+p.url+'">') +
+      '<div class="x" onclick="quitar('+i+')">✕</div>' +
+      '<div class="peso">'+fmtPeso(p.file.size)+'</div>' +
+    '</div>').join('');
+}
+function quitar(i){ pendientes.splice(i,1); pintar(); }
+
+// ── Envío ──────────────────────────────────────────────────
+async function enviar(){
+  const nota  = document.getElementById('nota').value.trim();
+  const fecha = document.getElementById('fecha').value;
+
+  if (!OBRA) return;
+  if (!pendientes.length && !nota){
+    mostrarError('Agregá al menos una foto o escribí qué se hizo.');
+    return;
+  }
+
+  const btn = document.getElementById('enviar');
+  const barra = document.getElementById('barra');
+  const estado = document.getElementById('estado');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  barra.style.display = 'block';
+  mostrarError('');
+
+  const slug = OBRA.replace(/[^a-zA-Z0-9]/g, '_');
+  const archivos = [];
+  let fallos = 0;
+
+  for (let i = 0; i < pendientes.length; i++){
+    const p = pendientes[i];
+    estado.textContent = 'Subiendo ' + (i+1) + ' de ' + pendientes.length + '…';
+    barra.firstElementChild.style.width = Math.round((i/pendientes.length)*100) + '%';
+    const ext  = p.tipo === 'vid' ? ((p.file.name||'v.mp4').split('.').pop() || 'mp4') : 'jpg';
+    const path = slug + '/web_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) + '.' + ext;
+    try {
+      const { error } = await supa.storage.from(BUCKET).upload(path, p.file, {
+        contentType: p.file.type || (p.tipo==='vid' ? 'video/mp4' : 'image/jpeg')
+      });
+      if (error) throw error;
+      const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+      archivos.push({ u:data.publicUrl, p:path, s:p.file.size, t:p.tipo });
+    } catch(e){ fallos++; console.warn(e); }
+  }
+
+  barra.firstElementChild.style.width = '100%';
+  estado.textContent = 'Guardando…';
+
+  const { error } = await supa.from('axo_libro_bot').insert({
+    obra: OBRA, fecha, texto: nota, archivos, origen: 'link', autor: 'Obra', estado: 'pendiente'
+  });
+
+  if (error){
+    mostrarError('No se pudo guardar: ' + error.message + '. Revisá la señal y probá de nuevo.');
+    btn.disabled = false; btn.textContent = 'Enviar';
+    barra.style.display = 'none'; estado.textContent = '';
+    return;
+  }
+
+  document.getElementById('app').style.display = 'none';
+  document.getElementById('gracias').style.display = 'block';
+  document.getElementById('resumen-envio').textContent =
+    archivos.length + ' archivo(s) enviados' + (fallos ? ' — ' + fallos + ' fallaron, probá de nuevo con esos' : '') + '.';
+}
+</script>
+</body>
+</html>
