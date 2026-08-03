@@ -76,9 +76,27 @@
 
   <div class="marca"><span class="punto"></span><span>AXO CONSTRUCCIONES</span></div>
 
+  <!-- Selector de obra: solo aparece si el link es el genérico, sin obra fijada -->
+  <div id="elegir" style="display:none">
+    <h1>¿En qué obra estás?</h1>
+    <p class="obra">Elegí la obra a la que vas a cargar. Queda recordada para la próxima.</p>
+    <div id="lista-obras"></div>
+    <div id="elegir-estado" class="aviso"></div>
+  </div>
+
   <div id="app">
-    <h1>Carga del día</h1>
-    <p class="obra">Obra: <b id="nombre-obra">—</b></p>
+    <h1 id="titulo-obra">Carga del día</h1>
+    <p class="obra">Obra: <b id="nombre-obra">—</b>
+      <a id="cambiar-obra" href="#" onclick="cambiarObra();return false" style="display:none;font-size:13px;color:var(--verde);margin-left:8px">cambiar</a>
+    </p>
+
+    <div id="instalar-caja" class="caja" style="display:none;background:var(--verde-claro);border-color:var(--verde)">
+      <div style="font-size:13px;color:var(--verde-osc);margin-bottom:9px">
+        📲 Guardá esta obra en tu celular para entrar de un toque, sin buscar el link.
+      </div>
+      <button class="btn lleno" style="margin:0" onclick="instalarApp()">Agregar a la pantalla de inicio</button>
+      <div id="instalar-manual" style="display:none;font-size:12.5px;color:var(--verde-osc);line-height:1.6;margin-top:10px;padding-top:10px;border-top:1px solid rgba(74,103,65,.25)"></div>
+    </div>
 
     <div id="err" class="error" style="display:none"></div>
 
@@ -140,23 +158,265 @@ const VIDEO_MAX_MB = 25, VIDEO_MAX_SEG = 70;
 
 const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
+// El link puede venir de dos formas:
+//   · Con obra fijada  (?c=Cliente&o=Trabajo) → un ícono por obra, sin margen de error
+//   · Genérico         (sin parámetros)       → un solo ícono, se elige la obra al entrar
+// Las dos conviven a propósito: el fijo es más seguro, el genérico más cómodo.
 const params = new URLSearchParams(location.search);
-const OBRA = (params.get('o') || '').trim();
+const CLAVE_OBRAS_PUBLICAS = 'informe_obras_activas';
+const RECUERDO = 'axo_obra_elegida';
+
+let TRABAJO = (params.get('o') || '').trim();   // tipo de trabajo: Refacción, Ampliación…
+let CLIENTE = (params.get('c') || '').trim();   // lo que de verdad distingue una obra de otra
+const LINK_FIJO = !!(TRABAJO || CLIENTE);
+
+// Si el link es genérico, se recupera la última obra elegida en este celular
+if (!LINK_FIJO) {
+  try {
+    const r = JSON.parse(localStorage.getItem(RECUERDO) || 'null');
+    if (r && (r.c || r.p)) { CLIENTE = r.c || ''; TRABAJO = r.p || ''; }
+  } catch(e) {}
+}
+
+// Clave con la que el sistema encuentra estas cargas. Tiene que armarse igual
+// que claveObra() en index.html, si no las fotos suben pero no aparecen.
+function armarClave(c, t){
+  c = (c||'').trim(); t = (t||'').trim();
+  return (c && t) ? (c + ' — ' + t) : (c || t);
+}
+let OBRA = armarClave(CLIENTE, TRABAJO);
 
 let pendientes = [];   // [{file, tipo, url}]
 
+// ── Instalación en el celular ──────────────────────────────
+// El ícono tiene que decir el nombre de la obra: si el residente trabaja
+// en tres obras, tres íconos iguales no le sirven de nada. Para eso hace
+// falta un manifiesto propio por obra, y como la obra viene en el link,
+// se arma en el momento y se enchufa como blob.
+// Palabras que van al ícono. Las iniciales no sirven para reconocer una obra:
+// "AC" no le dice nada a nadie, "AMPLIACIÓN GONZÁLEZ" sí. Se sacan los conectores
+// y se toman las dos palabras que de verdad identifican el presupuesto.
+const PALABRAS_VACIAS = new Set(['de','del','la','el','los','las','y','en','para','a','con','sr','sra','sres','flia','familia']);
+
+function palabrasObra(nombre, max){
+  const ws = String(nombre || 'AXO')
+    .split(/[\s\-_/]+/)
+    .filter(w => w && !PALABRAS_VACIAS.has(w.toLowerCase()));
+  return (ws.length ? ws : ['AXO']).slice(0, max || 2);
+}
+
+// El apellido del cliente primero, después el tipo de trabajo:
+// "Refacción" se repite entre obras, "Bogado" no.
+function palabrasIcono(){
+  const c = palabrasObra(CLIENTE, 9), p = palabrasObra(TRABAJO, 9);
+  const hayC = CLIENTE && c[0] !== 'AXO', hayP = TRABAJO && p[0] !== 'AXO';
+  if (hayC && hayP) return [c[c.length-1], p[0]];
+  if (hayC) return c.slice(0, 2);
+  if (hayP) return p.slice(0, 2);
+  return ['AXO'];
+}
+
+function iconoObra(px){
+  const cv = document.createElement('canvas');
+  cv.width = cv.height = px;
+  const c = cv.getContext('2d');
+  c.fillStyle = '#4A6741'; c.fillRect(0, 0, px, px);
+
+  const lineas = palabrasIcono().map(w => w.toUpperCase());
+  c.fillStyle = '#fff';
+  c.textAlign = 'center';
+  c.textBaseline = 'middle';
+
+  // El tamaño se ajusta a la palabra más larga para que nunca se corte
+  const masLarga = lineas.reduce((a, b) => a.length >= b.length ? a : b, '');
+  let tam = Math.min(px * 0.26, (px * 0.86) / Math.max(masLarga.length * 0.58, 1));
+  c.font = 'bold ' + Math.round(tam) + 'px sans-serif';
+
+  const alto = tam * 1.12;
+  const y0 = px * 0.44 - (lineas.length - 1) * alto / 2;
+  lineas.forEach((l, i) => c.fillText(l, px / 2, y0 + i * alto));
+
+  c.font = Math.round(px * 0.11) + 'px sans-serif';
+  c.fillStyle = 'rgba(255,255,255,0.72)';
+  c.fillText('AXO', px / 2, px * 0.85);
+  return cv.toDataURL('image/png');
+}
+
+function montarManifest(){
+  if (!OBRA) return;
+  // El nombre corto es lo que se lee DEBAJO del ícono. Android muestra unos
+  // 12 caracteres, así que se corta por palabra entera y no a la mitad.
+  // Debajo del ícono Android muestra ~12 caracteres: va el apellido, que es
+  // lo que distingue, no el tipo de trabajo que se repite.
+  let corto = palabrasIcono().join(' ');
+  if (corto.length > 14) corto = palabrasIcono()[0].slice(0, 14);
+
+  const manifest = {
+    name: OBRA + ' — Carga de obra',
+    short_name: corto,
+    description: 'Carga de fotos y avances de obra — AXO Construcciones',
+    start_url: location.pathname + location.search,
+    scope: location.pathname,
+    display: 'standalone',
+    orientation: 'portrait',
+    background_color: '#F6F3EC',
+    theme_color: '#4A6741',
+    icons: [
+      { src: iconoObra(192), sizes: '192x192', type: 'image/png', purpose: 'any' },
+      { src: iconoObra(512), sizes: '512x512', type: 'image/png', purpose: 'any maskable' }
+    ]
+  };
+  try {
+    const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
+    const link = document.createElement('link');
+    link.rel = 'manifest';
+    link.href = URL.createObjectURL(blob);
+    document.head.appendChild(link);
+  } catch(e) { console.warn('manifest', e); }
+}
+
+// Chrome pide un service worker con manejador de fetch para ofrecer instalar
+if ('serviceWorker' in navigator) {
+  navigator.serviceWorker.register('obra-sw.js').catch(e => console.warn('sw', e));
+}
+
+// Chrome decide por su cuenta cuándo ofrecer instalar, y a veces no lo ofrece
+// nunca (según la versión, el navegador o cuánto usaste la página). Por eso el
+// cartel se muestra SIEMPRE y, si el botón automático no está disponible,
+// aparecen las instrucciones a mano. Un camino que dependa del humor de Chrome
+// no sirve para alguien que está parado en una obra.
+let _promptInstalar = null;
+
+window.addEventListener('beforeinstallprompt', ev => {
+  ev.preventDefault();
+  _promptInstalar = ev;
+  const m = document.getElementById('instalar-manual');
+  if (m) m.style.display = 'none';
+});
+window.addEventListener('appinstalled', () => {
+  const c = document.getElementById('instalar-caja');
+  if (c) c.style.display = 'none';
+});
+
+function textoInstalarManual(){
+  const ua = navigator.userAgent;
+  if (/iPad|iPhone|iPod/.test(ua))
+    return 'Tocá <strong>Compartir</strong> ⬆️ abajo en la pantalla y elegí <strong>“Añadir a pantalla de inicio”</strong>.';
+  if (/Android/.test(ua))
+    return 'Tocá el menú <strong>⋮</strong> arriba a la derecha y elegí <strong>“Agregar a pantalla principal”</strong> o <strong>“Instalar aplicación”</strong>.';
+  return 'En el navegador, buscá en el menú la opción <strong>“Instalar”</strong> o <strong>“Crear acceso directo”</strong>.';
+}
+
+async function instalarApp(){
+  if (_promptInstalar) {
+    _promptInstalar.prompt();
+    const r = await _promptInstalar.userChoice;
+    _promptInstalar = null;
+    if (r && r.outcome === 'accepted') {
+      const c = document.getElementById('instalar-caja');
+      if (c) c.style.display = 'none';
+    }
+    return;
+  }
+  // Sin prompt automático: se explica el camino a mano
+  const m = document.getElementById('instalar-manual');
+  if (m) { m.innerHTML = textoInstalarManual(); m.style.display = 'block'; }
+}
+
+// ── Selector de obra (link genérico) ───────────────────────
+async function mostrarSelectorObras(){
+  document.getElementById('app').style.display = 'none';
+  const caja = document.getElementById('elegir');
+  const est  = document.getElementById('elegir-estado');
+  caja.style.display = 'block';
+  est.textContent = 'Buscando las obras…';
+
+  let obras = [];
+  try {
+    const { data, error } = await supa.from('axo_datos').select('valor').eq('clave', CLAVE_OBRAS_PUBLICAS).single();
+    if (error) throw error;
+    obras = Array.isArray(data && data.valor) ? data.valor : [];
+  } catch(e) {
+    est.innerHTML = 'No se pudo traer la lista de obras. Revisá la señal, o pedile a Monica el link directo de tu obra.';
+    return;
+  }
+
+  if (!obras.length) {
+    est.innerHTML = 'Todavía no hay obras disponibles. Pedile a Monica que abra el Libro de Obra una vez para publicarlas.';
+    return;
+  }
+
+  est.textContent = '';
+  document.getElementById('lista-obras').innerHTML = obras.map((o, i) =>
+    `<button class="btn" style="text-align:left;justify-content:flex-start;flex-direction:column;align-items:flex-start;gap:2px"
+       onclick="elegirObra(${i})">
+       <span style="font-size:17px;font-weight:600">${(o.c || o.p || '').replace(/</g,'&lt;')}</span>
+       ${o.c && o.p ? `<span style="font-size:13px;font-weight:400;color:var(--tinta-suave)">${o.p.replace(/</g,'&lt;')}</span>` : ''}
+     </button>`).join('');
+  window.__obras = obras;
+}
+
+function elegirObra(i){
+  const o = (window.__obras || [])[i];
+  if (!o) return;
+  CLIENTE = o.c || ''; TRABAJO = o.p || '';
+  OBRA = armarClave(CLIENTE, TRABAJO);
+  try { localStorage.setItem(RECUERDO, JSON.stringify({ c: CLIENTE, p: TRABAJO })); } catch(e) {}
+  document.getElementById('elegir').style.display = 'none';
+  document.getElementById('app').style.display = 'block';
+  arrancarObra();
+}
+
+function cambiarObra(){
+  try { localStorage.removeItem(RECUERDO); } catch(e) {}
+  mostrarSelectorObras();
+}
+
 // ── Arranque ───────────────────────────────────────────────
-(function init(){
+function arrancarObra(){
   document.getElementById('fecha').value = new Date().toISOString().slice(0,10);
   const cont = document.getElementById('nombre-obra');
-  if (!OBRA) {
-    cont.textContent = 'sin definir';
+
+  cont.textContent = CLIENTE ? (CLIENTE + (TRABAJO ? ' · ' + TRABAJO : '')) : TRABAJO;
+  document.getElementById('titulo-obra').textContent = CLIENTE || TRABAJO;
+  // Con el link genérico se puede cambiar de obra; con el fijo no, para que
+  // nadie termine cargando en una obra que no le corresponde
+  const btnCambiar = document.getElementById('cambiar-obra');
+  if (btnCambiar) btnCambiar.style.display = LINK_FIJO ? 'none' : 'inline';
+  // El título es lo que Chrome usa como nombre del acceso directo si el
+  // residente lo agrega a mano en vez de instalarlo
+  document.title = (CLIENTE || TRABAJO) + ' — AXO';
+  montarManifest();
+
+  // El cartel de instalar se muestra siempre, salvo que ya esté instalada
+  const yaInstalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
+  if (!yaInstalada) {
+    const c = document.getElementById('instalar-caja');
+    if (c) c.style.display = 'block';
+    // Si en un par de segundos Chrome no ofreció instalar, se muestran
+    // directamente las instrucciones a mano, sin esperar a que toque el botón
+    setTimeout(() => {
+      if (_promptInstalar) return;
+      const m = document.getElementById('instalar-manual');
+      if (m && m.style.display === 'none') {
+        m.innerHTML = textoInstalarManual();
+        m.style.display = 'block';
+      }
+    }, 2500);
+  }
+}
+
+// Punto de entrada: con obra fijada arranca directo; sin obra, primero elige.
+(function init(){
+  if (OBRA) { arrancarObra(); return; }
+  if (LINK_FIJO) {
+    // El link traía parámetros pero vacíos: está mal armado
+    document.getElementById('nombre-obra').textContent = 'sin definir';
     mostrarError('Este link no tiene la obra cargada. Pedile a Monica que te reenvíe el link correcto.');
     document.getElementById('enviar').disabled = true;
-  } else {
-    cont.textContent = OBRA;
-    document.title = 'AXO — ' + OBRA;
+    return;
   }
+  mostrarSelectorObras();
 })();
 
 function mostrarError(t){
@@ -244,7 +504,7 @@ async function enviar(){
   barra.style.display = 'block';
   mostrarError('');
 
-  const slug = OBRA.replace(/[^a-zA-Z0-9]/g, '_');
+  const slug = OBRA.replace(/[^a-zA-Z0-9]/g, '_');   // carpeta del bucket, por obra
   const archivos = [];
   let fallos = 0;
 
