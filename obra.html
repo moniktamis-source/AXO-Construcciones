@@ -242,17 +242,16 @@ function iconoObra(px){
   return cv.toDataURL('image/png');
 }
 
+let _linkManifest = null;
 function montarManifest(){
-  if (!OBRA) return;
-  // El nombre corto es lo que se lee DEBAJO del ícono. Android muestra unos
-  // 12 caracteres, así que se corta por palabra entera y no a la mitad.
   // Debajo del ícono Android muestra ~12 caracteres: va el apellido, que es
   // lo que distingue, no el tipo de trabajo que se repite.
   let corto = palabrasIcono().join(' ');
   if (corto.length > 14) corto = palabrasIcono()[0].slice(0, 14);
+  if (!OBRA) corto = 'Carga obra';   // link genérico, todavía sin obra elegida
 
   const manifest = {
-    name: OBRA + ' — Carga de obra',
+    name: OBRA ? (OBRA + ' — Carga de obra') : 'AXO — Carga de obra',
     short_name: corto,
     description: 'Carga de fotos y avances de obra — AXO Construcciones',
     start_url: location.pathname + location.search,
@@ -267,11 +266,14 @@ function montarManifest(){
     ]
   };
   try {
+    // Al elegir obra se vuelve a armar: hay que reemplazar el anterior,
+    // si no quedan dos manifiestos y Chrome se queda con el viejo
+    if (_linkManifest) { URL.revokeObjectURL(_linkManifest.href); _linkManifest.remove(); }
     const blob = new Blob([JSON.stringify(manifest)], { type: 'application/manifest+json' });
-    const link = document.createElement('link');
-    link.rel = 'manifest';
-    link.href = URL.createObjectURL(blob);
-    document.head.appendChild(link);
+    _linkManifest = document.createElement('link');
+    _linkManifest.rel = 'manifest';
+    _linkManifest.href = URL.createObjectURL(blob);
+    document.head.appendChild(_linkManifest);
   } catch(e) { console.warn('manifest', e); }
 }
 
@@ -387,27 +389,31 @@ function arrancarObra(){
   // residente lo agrega a mano en vez de instalarlo
   document.title = (CLIENTE || TRABAJO) + ' — AXO';
   montarManifest();
+}
 
-  // El cartel de instalar se muestra siempre, salvo que ya esté instalada
+// El cartel de instalar NO puede depender de haber elegido obra: con el link
+// genérico, la primera pantalla es el selector, y ahí es justo cuando conviene
+// ofrecer guardarla en el celular.
+function mostrarCartelInstalar(){
   const yaInstalada = window.matchMedia('(display-mode: standalone)').matches || navigator.standalone;
-  if (!yaInstalada) {
-    const c = document.getElementById('instalar-caja');
-    if (c) c.style.display = 'block';
-    // Si en un par de segundos Chrome no ofreció instalar, se muestran
-    // directamente las instrucciones a mano, sin esperar a que toque el botón
-    setTimeout(() => {
-      if (_promptInstalar) return;
-      const m = document.getElementById('instalar-manual');
-      if (m && m.style.display === 'none') {
-        m.innerHTML = textoInstalarManual();
-        m.style.display = 'block';
-      }
-    }, 2500);
-  }
+  if (yaInstalada) return;
+  const c = document.getElementById('instalar-caja');
+  if (c) c.style.display = 'block';
+  // Si en un par de segundos Chrome no ofreció instalar, se muestran
+  // directamente las instrucciones a mano, sin esperar a que toque el botón
+  setTimeout(() => {
+    if (_promptInstalar) return;
+    const m = document.getElementById('instalar-manual');
+    if (m && m.style.display === 'none') {
+      m.innerHTML = textoInstalarManual();
+      m.style.display = 'block';
+    }
+  }, 2500);
 }
 
 // Punto de entrada: con obra fijada arranca directo; sin obra, primero elige.
 (function init(){
+  mostrarCartelInstalar();   // siempre, sin depender de la obra
   if (OBRA) { arrancarObra(); return; }
   if (LINK_FIJO) {
     // El link traía parámetros pero vacíos: está mal armado
@@ -416,6 +422,7 @@ function arrancarObra(){
     document.getElementById('enviar').disabled = true;
     return;
   }
+  montarManifest();          // nombre genérico hasta que elija la obra
   mostrarSelectorObras();
 })();
 
