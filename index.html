@@ -11759,17 +11759,32 @@ function panelPendientesLibro(){
 // 'informe_...', que es el único prefijo que el rol anónimo puede leer.
 const CLAVE_OBRAS_PUBLICAS = 'informe_obras_activas';
 
-async function publicarObrasActivas(lista){
-  if (typeof supa === 'undefined' || !supa) return;
+async function publicarObrasActivas(lista, avisar){
+  if (typeof supa === 'undefined' || !supa) {
+    if (avisar) alert('No hay conexión con la nube.');
+    return false;
+  }
   const publico = (lista || []).map(o => ({ c: o.cliente || '', p: o.proyecto || '' }));
   try {
-    await supa.from('axo_datos').upsert({
+    const { error } = await supa.from('axo_datos').upsert({
       clave: CLAVE_OBRAS_PUBLICAS,
       valor: publico,
       actualizado: new Date().toISOString()
     });
-  } catch(e) { console.warn('[Obras públicas] no se pudo publicar la lista:', e && e.message); }
+    if (error) throw error;
+    if (avisar && typeof mostrarToastGuardado === 'function')
+      mostrarToastGuardado('✅ ' + publico.length + ' obra(s) publicadas para el link');
+    return true;
+  } catch(e) {
+    console.warn('[Obras públicas] no se pudo publicar la lista:', e && e.message);
+    if (avisar) alert('No se pudo publicar la lista de obras:\n' + (e && e.message ? e.message : 'error desconocido'));
+    return false;
+  }
 }
+
+// Se guarda para que el botón de "volver a publicar" tenga qué mandar
+let _obrasParaPublicar = [];
+function republicarObras(){ publicarObrasActivas(_obrasParaPublicar, true); }
 
 function urlObraResidente(cliente, proyecto){
   const base = location.href.replace(/[^/]*$/, '') + 'obra.html?o=' + encodeURIComponent(proyecto || '');
@@ -11818,6 +11833,7 @@ function linkObraResidente(){
   if (!obras.length) return '';
 
   // La lista viaja a la nube para que el link genérico sepa qué obras ofrecer
+  _obrasParaPublicar = obras;
   publicarObrasActivas(obras);
 
   const generico = location.href.replace(/[^/]*$/, '') + 'obra.html';
@@ -11866,6 +11882,10 @@ function linkObraResidente(){
           <input readonly value="${generico}" onclick="this.select()" style="flex:1;min-width:190px;padding:5px 8px;border:1px solid #ddd;border-radius:5px;font-size:10.5px;background:#fff;color:#666">
           <button class="btn btn-outline btn-sm" onclick="copiarAlPortapapeles('${generico}',this,'✅')">📋</button>
           <a href="https://wa.me/?text=${encodeURIComponent('Carga de obra AXO: ' + generico)}" target="_blank" rel="noopener" class="btn btn-outline btn-sm" style="text-decoration:none">Enviar</a>
+          <button class="btn btn-outline btn-sm" onclick="republicarObras()" title="Manda a la nube la lista de obras que va a ver el residente">🔄 Publicar lista</button>
+        </div>
+        <div style="font-size:10.5px;color:#999;margin-top:6px">
+          La lista se publica sola cada vez que abrís el Libro de Obra. Si el residente no ve sus obras, tocá “Publicar lista”.
         </div>
       </div>
     </div></div>`;
