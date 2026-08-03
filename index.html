@@ -11597,14 +11597,30 @@ function nombreObraActual(){
   return (document.getElementById('p-proyecto')?.value || '').trim();
 }
 
+// El nombre del proyecto solo no alcanza para identificar una obra: "Refacción"
+// o "Ampliación" se repiten entre clientes distintos. Lo que no se repite es el
+// cliente, así que la obra se identifica con los dos juntos.
+function claveObra(cliente, proyecto){
+  const c = (cliente || '').trim(), p = (proyecto || '').trim();
+  if (c && p) return c + ' — ' + p;
+  return c || p;
+}
+function claveObraActual(){
+  return claveObra(document.getElementById('p-cliente')?.value,
+                   document.getElementById('p-proyecto')?.value);
+}
+
 // Trae de la nube lo pendiente de ESTA obra
 async function cargarPendientesLibro(silencioso){
   const obra = nombreObraActual();
   if (!obra || typeof supa === 'undefined' || !supa) { _libroPendientes = []; return; }
   _libroPendientesCargando = true;
   try {
+    // Se aceptan las dos formas: la clave nueva (cliente — proyecto) y la
+    // vieja (solo proyecto), para no perder lo cargado antes del cambio.
+    const claves = [...new Set([claveObraActual(), obra].filter(Boolean))];
     const { data, error } = await supa.from('axo_libro_bot')
-      .select('*').eq('obra', obra).eq('estado', 'pendiente')
+      .select('*').in('obra', claves).eq('estado', 'pendiente')
       .order('fecha', { ascending: false });
     if (error) throw error;
     _libroPendientes = data || [];
@@ -11736,8 +11752,24 @@ function panelPendientesLibro(){
 // Links para el residente — uno por obra, todos juntos
 // Con varias obras andando hace falta verlos en una sola lista: si solo se
 // muestra el de la obra abierta, hay que entrar a cada una para copiarlo.
-function urlObraResidente(obra){
-  return location.href.replace(/[^/]*$/, '') + 'obra.html?o=' + encodeURIComponent(obra);
+function urlObraResidente(cliente, proyecto){
+  const base = location.href.replace(/[^/]*$/, '') + 'obra.html?o=' + encodeURIComponent(proyecto || '');
+  return (cliente || '').trim() ? (base + '&c=' + encodeURIComponent(cliente.trim())) : base;
+}
+
+// Mismo criterio que usa obra.html para dibujar el ícono.
+// El CLIENTE va primero: "Refacción" y "Ampliación" se repiten entre obras,
+// el apellido no. Después el tipo de trabajo, que es lo que termina de ubicar.
+const PALABRAS_VACIAS_OBRA = new Set(['de','del','la','el','los','las','y','en','para','a','con','sr','sra','sres','flia','familia','arq','ing']);
+function _sigObra(t){
+  return String(t || '').split(/[\s\-_/]+/).filter(w => w && !PALABRAS_VACIAS_OBRA.has(w.toLowerCase()));
+}
+function palabrasIcono(cliente, proyecto){
+  const c = _sigObra(cliente), p = _sigObra(proyecto);
+  if (c.length && p.length) return [c[c.length-1], p[0]];   // apellido + trabajo
+  if (c.length) return c.slice(0, 2);
+  if (p.length) return p.slice(0, 2);
+  return ['AXO'];
 }
 
 function linkObraResidente(){
@@ -11747,28 +11779,46 @@ function linkObraResidente(){
   let obras = [];
   try {
     const guardados = getProyectosGuardados();
-    obras = Object.keys(guardados).filter(n => {
+    Object.keys(guardados).forEach(n => {
       const p = guardados[n];
-      return p && (p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado');
-    }).map(n => (guardados[n].proyecto || n)).filter(Boolean);
+      if (!p || (p.estadoProyecto !== 'aprobado' && p.estadoProyecto !== 'finalizado')) return;
+      obras.push({ cliente: (p.cliente||'').trim(), proyecto: (p.proyecto||n).trim() });
+    });
   } catch(e) {}
-  if (actual && !obras.includes(actual)) obras.unshift(actual);
-  obras = [...new Set(obras)].sort();
+  const cliAct = (document.getElementById('p-cliente')?.value || '').trim();
+  if (actual && !obras.some(o => o.proyecto === actual && o.cliente === cliAct)) {
+    obras.unshift({ cliente: cliAct, proyecto: actual });
+  }
+  // Sin duplicados, ordenadas por cliente
+  const vistas = new Set();
+  obras = obras.filter(o => {
+    const k = claveObra(o.cliente, o.proyecto);
+    if (!k || vistas.has(k)) return false;
+    vistas.add(k); return true;
+  }).sort((a,b) => claveObra(a.cliente,a.proyecto).localeCompare(claveObra(b.cliente,b.proyecto)));
   if (!obras.length) return '';
 
   const filas = obras.map(o => {
-    const url = urlObraResidente(o);
-    const esActual = o === actual;
-    const ini = o.split(/[\s-]+/).filter(Boolean).slice(0,2).map(p=>p[0]).join('').toUpperCase() || 'AX';
+    const url = urlObraResidente(o.cliente, o.proyecto);
+    const esActual = o.proyecto === actual && o.cliente === cliAct;
+    const pal = palabrasIcono(o.cliente, o.proyecto).map(w => w.toUpperCase());
+    const masLarga = pal.reduce((a,b)=>a.length>=b.length?a:b,'');
+    const tamIcono = Math.max(5, Math.min(11, Math.round(44 / Math.max(masLarga.length*0.62,1))));
     return `<tr style="border-bottom:1px solid #f0f0f0;${esActual?'background:#F4F7F3':''}">
-      <td style="padding:6px 9px;width:40px">
-        <div title="Así se va a ver el ícono en el celular" style="width:30px;height:30px;border-radius:6px;background:#4A6741;color:#fff;display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:700">${ini}</div>
+      <td style="padding:6px 9px;width:56px">
+        <div title="Así se va a ver el ícono en el celular" style="width:46px;height:46px;border-radius:10px;background:#4A6741;color:#fff;display:flex;flex-direction:column;align-items:center;justify-content:center;line-height:1.08;padding:2px">
+          ${pal.map(w=>`<span style="font-size:${tamIcono}px;font-weight:700;letter-spacing:-0.02em">${w}</span>`).join('')}
+          <span style="font-size:6px;opacity:.7;margin-top:1px">AXO</span>
+        </div>
       </td>
-      <td style="padding:6px 4px;font-size:12px;font-weight:600">${o.replace(/</g,'&lt;')}${esActual?' <span style="font-size:10px;color:#4A6741;font-weight:400">· abierta</span>':''}</td>
+      <td style="padding:6px 4px;font-size:12px">
+        <div style="font-weight:600">${(o.cliente||'—').replace(/</g,'&lt;')}${esActual?' <span style="font-size:10px;color:#4A6741;font-weight:400">· abierta</span>':''}</div>
+        <div style="font-size:11px;color:#888">${(o.proyecto||'').replace(/</g,'&lt;')}</div>
+      </td>
       <td style="padding:6px 4px"><input readonly value="${url}" onclick="this.select()" style="width:100%;min-width:180px;padding:4px 7px;border:1px solid #ddd;border-radius:5px;font-size:10.5px;background:#FAFAFA;color:#666"></td>
       <td class="center" style="padding:6px 9px;white-space:nowrap">
         <button class="btn btn-outline btn-sm" onclick="copiarAlPortapapeles('${url}',this,'✅')">📋</button>
-        <a href="https://wa.me/?text=${encodeURIComponent('Carga de obra ' + o + ': ' + url)}" target="_blank" rel="noopener"
+        <a href="https://wa.me/?text=${encodeURIComponent('Carga de obra — ' + claveObra(o.cliente, o.proyecto) + ': ' + url)}" target="_blank" rel="noopener"
            class="btn btn-outline btn-sm" style="text-decoration:none">Enviar</a>
       </td>
     </tr>`;
