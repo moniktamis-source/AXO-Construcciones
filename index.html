@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.03-b7</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-frag1</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -3256,6 +3256,348 @@ window.__axoClavesEnVuelo = new Set();
 const AXO_MODULOS_REGISTRO = ['axo_proyectos','axo_crm','axo_clientes','axo_proveedores','axo_relevamientos','axo_especificaciones','axo_gabinete','axo_plantillas'];
 function axoEsModuloRegistro(clave){ return AXO_MODULOS_REGISTRO.indexOf(clave) !== -1; }
 
+// ═══════════════════════════════════════════════════════════════════════
+// SINCRONIZACION POR FRAGMENTO  (06/08/2026)
+//
+// El paso del 05/08 hizo que cada OBRA fuera una fila. Eso cerro el caso
+// "Monica en la obra A, Daissy en la obra B". Lo que seguia abierto era
+// "las dos en la MISMA obra": como la obra entera era una sola fila, tocar
+// una compra reescribia tambien el computo, el cronograma y el flujo de
+// caja. La ultima en guardar borraba el trabajo de la otra — y no solo las
+// compras: la obra completa.
+//
+// Ahora cada obra viaja partida en pedazos independientes:
+//   "Casa Perez"              -> presupuesto (computo, indices, aprobacion)
+//   "Casa Perez|s"            -> seguimiento (adjudicados, caja, certificacion)
+//   "Casa Perez|c"            -> cronograma
+//   "Casa Perez|e|mat:X@C1"   -> UNA fila por compra
+//
+// Adentro del sistema NADA cambia: se sigue trabajando con el mismo objeto
+// de siempre en localStorage. Lo unico distinto es como sube y baja.
+//
+// Compatible hacia atras: las filas viejas (la obra entera, sin separador y
+// sin la marca __axoPartido) se siguen entendiendo al bajar.
+// ═══════════════════════════════════════════════════════════════════════
+const AXO_SEP = '‖';   // separador que ningun nombre de obra va a tener
+const AXO_CAMPOS_SEG = ['adjudicaciones','proveedoresAdj','certRet','cobrosReales','movimientos','vencimientos','hitos','cortesAdmin'];
+const AXO_CAMPOS_CRONO = ['cronograma','cronogramaAdic','cronogramaReal','cronogramaRealAdic','fechaInicioReal','cronoSemanas','calConfig','cuadrillaTamano','dependenciasRubro'];
+// 'ejecucion' (las compras) no entra en ningun grupo: se parte de a una fila por compra.
+
+function axoGrupoCampo(k){
+  if(k === 'ejecucion') return 'e';
+  if(AXO_CAMPOS_SEG.indexOf(k) !== -1) return 's';
+  if(AXO_CAMPOS_CRONO.indexOf(k) !== -1) return 'c';
+  return 'b';
+}
+function axoVacioObj(d){
+  if(d === null || d === undefined) return true;
+  if(Array.isArray(d)) return d.length === 0;
+  if(typeof d === 'object') return Object.keys(d).length === 0;
+  return false;
+}
+
+// Parte una obra en sus fragmentos. Devuelve { reg_id: datosDelFragmento }
+function axoPartirProyecto(nombre, p){
+  const frags = {};
+  const base = { __axoPartido: 1 };   // la marca distingue esta fila de una fila vieja con la obra entera
+  const seg  = { __axoFrag: 's' };    // el marcador ademas evita que un fragmento quede literalmente {}
+  const cro  = { __axoFrag: 'c' };    //   y dispare el candado anti-vaciado de la base
+  Object.keys(p || {}).forEach(k=>{
+    const g = axoGrupoCampo(k);
+    if(g === 'e') return;
+    if(g === 's') seg[k] = p[k];
+    else if(g === 'c') cro[k] = p[k];
+    else base[k] = p[k];
+  });
+  frags[nombre] = base;
+  frags[nombre + AXO_SEP + 's'] = seg;
+  frags[nombre + AXO_SEP + 'c'] = cro;
+  const ej = (p && p.ejecucion) || {};
+  Object.keys(ej).forEach(ekey=>{ frags[nombre + AXO_SEP + 'e' + AXO_SEP + ekey] = ej[ekey]; });
+  return frags;
+}
+
+// Vuelve a armar la obra a partir de un fragmento que llego de la nube.
+function axoAplicarFragmento(obj, r, huellas){
+  const partes = String(r.reg_id).split(AXO_SEP);
+  const nombre = partes[0];
+  const tipo = partes[1] || 'b';
+  const h = axoHuella(r.datos);
+  if(!r.borrado && huellas[r.reg_id] === h) return false;
+
+  if(tipo === 'b'){
+    if(r.borrado){ delete obj[nombre]; }
+    else{
+      const p = obj[nombre] || {};
+      // saco lo que es "base" y pongo lo que llega; seguimiento, cronograma y
+      // compras quedan intactos porque viajan en sus propias filas
+      Object.keys(p).forEach(k=>{ if(axoGrupoCampo(k) === 'b') delete p[k]; });
+      Object.assign(p, r.datos || {});
+      delete p.__axoPartido;
+      obj[nombre] = p;
+    }
+  } else if(tipo === 's' || tipo === 'c'){
+    const campos = (tipo === 's') ? AXO_CAMPOS_SEG : AXO_CAMPOS_CRONO;
+    const p = obj[nombre] || {};
+    campos.forEach(k=>{ delete p[k]; });
+    if(!r.borrado) Object.assign(p, r.datos || {});
+    delete p.__axoFrag;
+    obj[nombre] = p;
+  } else if(tipo === 'e'){
+    const ekey = partes.slice(2).join(AXO_SEP);
+    const p = obj[nombre] || {};
+    if(!p.ejecucion) p.ejecucion = {};
+    if(r.borrado) delete p.ejecucion[ekey];
+    else p.ejecucion[ekey] = r.datos;
+    obj[nombre] = p;
+  }
+  if(r.borrado) delete huellas[r.reg_id]; else huellas[r.reg_id] = h;
+  return true;
+}
+
+// La base tiene que aplicarse antes que sus pedazos, si no el pedazo se pierde
+function axoOrdenarFragmentos(filas){
+  const peso = function(id){
+    const t = String(id).split(AXO_SEP)[1];
+    if(!t) return 0;          // fila vieja completa, o base partida
+    if(t === 's' || t === 'c') return 1;
+    return 2;                 // compras
+  };
+  return filas.slice().sort(function(a,b){ return peso(a.reg_id) - peso(b.reg_id); });
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// LA GUARDIA: no pisar lo que hizo la otra persona
+//
+// Antes de subir, se compara contra la nube. Si una fila cambio DESPUES de
+// la ultima vez que este equipo la vio, no se sube: se avisa y se deja
+// elegir. Sin esto, con obras partidas el choque es raro pero no imposible
+// (las dos editando exactamente el mismo pedazo de la misma obra).
+// ═══════════════════════════════════════════════════════════════════════
+function axoLeerVistos(){ try{ return JSON.parse(localStorage.getItem('axo_ts_reg')||'null'); }catch(e){ return null; } }
+function axoGuardarVistos(v){
+  try{
+    const set = window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage);
+    set('axo_ts_reg', JSON.stringify(v));
+  }catch(e){ console.warn('[guardia] no se pudieron guardar las marcas de tiempo', e && e.name); }
+}
+function axoMarcarVisto(modulo, regId, cuando){
+  const v = axoLeerVistos() || {};
+  v[modulo + '|' + regId] = cuando;
+  axoGuardarVistos(v);
+}
+
+// Devuelve las filas que cambiaron en la nube desde que este equipo las vio.
+async function axoDetectarChoques(modulo, ids){
+  const vistos = axoLeerVistos();
+  // Primera vez: este equipo nunca registro que vio nada. Tomamos la foto de
+  // la nube y NO marcamos choques — si no, el primer guardado despues de la
+  // actualizacion levantaria una alarma falsa por cada obra que existe.
+  const bootstrap = (vistos === null);
+  const v = vistos || {};
+
+  const choques = [];
+  for(let i=0; i<ids.length; i+=200){
+    const lote = ids.slice(i, i+200);
+    const { data, error } = await supa.from('axo_registros')
+      .select('reg_id,actualizado,quien,borrado').eq('modulo', modulo).in('reg_id', lote);
+    if(error){ return { error: error, choques: [], bootstrap: bootstrap }; }
+    (data||[]).forEach(r=>{
+      const clave = modulo + '|' + r.reg_id;
+      if(bootstrap){ v[clave] = r.actualizado; return; }
+      const visto = v[clave];
+      // Nunca vimos esta fila y sin embargo existe en la nube: la puso otra
+      // persona. Ante la duda, no se pisa.
+      if(!visto || Date.parse(r.actualizado) > Date.parse(visto)){
+        choques.push({ reg_id: r.reg_id, quien: r.quien || 'otro equipo', cuando: r.actualizado });
+      }
+    });
+  }
+  if(bootstrap) axoGuardarVistos(v);
+  return { error: null, choques: choques, bootstrap: bootstrap };
+}
+
+function axoNombreObraDeId(id){ return String(id).split(AXO_SEP)[0]; }
+function axoPedazoLegible(id){
+  const t = String(id).split(AXO_SEP)[1];
+  if(!t) return 'el presupuesto';
+  if(t === 's') return 'el seguimiento';
+  if(t === 'c') return 'el cronograma';
+  return 'las compras';
+}
+
+// Cartel de choque. No usa alert() para no cortarle el trabajo de golpe:
+// los cambios de ella ya estan guardados en el equipo, esto solo decide
+// que hacer con la nube.
+function axoMostrarChoque(choques){
+  if(document.getElementById('axo-choque')) return;   // ya hay uno abierto
+  const porObra = {};
+  choques.forEach(c=>{
+    const o = axoNombreObraDeId(c.reg_id);
+    if(!porObra[o]) porObra[o] = { quien: c.quien, cuando: c.cuando, pedazos: [] };
+    const p = axoPedazoLegible(c.reg_id);
+    if(porObra[o].pedazos.indexOf(p) === -1) porObra[o].pedazos.push(p);
+  });
+  const detalle = Object.keys(porObra).map(function(o){
+    const d = porObra[o];
+    let cuando = '';
+    try{ cuando = new Date(d.cuando).toLocaleString('es-PY',{hour:'2-digit',minute:'2-digit',day:'2-digit',month:'2-digit'}); }catch(e){}
+    return '<li style="margin-bottom:6px"><b>' + o + '</b> — ' + d.pedazos.join(' y ') +
+           '<br><span style="color:#6B6B6B;font-size:12px">lo modificó ' + (d.quien||'otro equipo') + (cuando ? ' el ' + cuando : '') + '</span></li>';
+  }).join('');
+
+  const fondo = document.createElement('div');
+  fondo.id = 'axo-choque';
+  fondo.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.45);z-index:100000;display:flex;align-items:center;justify-content:center;padding:20px';
+  fondo.innerHTML =
+    '<div style="background:#fff;border-radius:10px;max-width:520px;width:100%;box-shadow:0 8px 40px rgba(0,0,0,.3);overflow:hidden">' +
+      '<div style="background:#E65100;color:#fff;padding:14px 20px;font-weight:700;font-size:15px">⚠️ Otra persona modificó esta obra</div>' +
+      '<div style="padding:20px;font-size:13px;line-height:1.55;color:#1C1C1C">' +
+        '<p style="margin-bottom:12px">Mientras trabajabas, alguien más guardó cambios en:</p>' +
+        '<ul style="margin:0 0 14px 18px">' + detalle + '</ul>' +
+        '<p style="margin-bottom:6px"><b>Tus cambios están guardados en este equipo.</b> Todavía no subieron a la nube, así que no se borró nada de nadie.</p>' +
+        '<p style="margin-bottom:16px;color:#6B6B6B;font-size:12px">Elijas lo que elijas, guardo antes una copia de tu versión en este equipo.</p>' +
+        '<div style="display:flex;gap:10px;flex-wrap:wrap">' +
+          '<button id="axo-choque-traer" style="flex:1;min-width:180px;padding:11px;border:none;border-radius:6px;background:#4A6741;color:#fff;font-weight:600;font-size:13px;cursor:pointer">Traer lo de la otra persona</button>' +
+          '<button id="axo-choque-mio" style="flex:1;min-width:180px;padding:11px;border:1.5px solid #C00000;border-radius:6px;background:#fff;color:#C00000;font-weight:600;font-size:13px;cursor:pointer">Quedarme con lo mío</button>' +
+        '</div>' +
+        '<p style="margin-top:12px;color:#6B6B6B;font-size:11.5px">“Quedarme con lo mío” pisa lo que hizo la otra persona. Se puede recuperar desde el historial de 90 días.</p>' +
+      '</div>' +
+    '</div>';
+  document.body.appendChild(fondo);
+
+  const cerrar = function(){ const n = document.getElementById('axo-choque'); if(n) n.remove(); };
+  document.getElementById('axo-choque-traer').onclick = async function(){
+    axoRespaldarAntesDeChoque(choques);
+    cerrar();
+    try{
+      await axoTraerFragmentos(choques.map(c=>c.reg_id));
+      if(typeof repintarTabActivo === 'function') repintarTabActivo();
+      if(typeof mostrarToastGuardado === 'function') mostrarToastGuardado('Se trajo la versión de la nube');
+    }catch(e){ console.warn('[guardia] no se pudo traer', e); }
+  };
+  document.getElementById('axo-choque-mio').onclick = async function(){
+    axoRespaldarAntesDeChoque(choques);
+    cerrar();
+    window.__axoForzarSubida = true;
+    try{
+      await axoSubirProyectos();
+      if(typeof mostrarToastGuardado === 'function') mostrarToastGuardado('Se subió tu versión');
+    }catch(e){ console.warn('[guardia] no se pudo forzar', e); }
+    window.__axoForzarSubida = false;
+  };
+}
+
+// Copia de seguridad local de las obras en conflicto, antes de resolver
+function axoRespaldarAntesDeChoque(choques){
+  try{
+    const obj = axoLeerModulo('axo_proyectos');
+    const copia = {};
+    choques.forEach(c=>{ const o = axoNombreObraDeId(c.reg_id); if(obj[o]) copia[o] = obj[o]; });
+    const set = window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage);
+    set('axo_backup_conflicto', JSON.stringify({ cuando: new Date().toISOString(), obras: copia }));
+  }catch(e){ console.warn('[guardia] no se pudo respaldar', e && e.name); }
+}
+
+// Baja filas puntuales de la nube y las aplica (para "traer lo de la otra persona")
+async function axoTraerFragmentos(ids){
+  if(!supa || !ids.length) return 0;
+  const { data, error } = await supa.from('axo_registros')
+    .select('modulo,reg_id,datos,borrado,actualizado').eq('modulo','axo_proyectos').in('reg_id', ids);
+  if(error){ console.warn('[guardia] error trayendo', error); return 0; }
+  const obj = axoLeerModulo('axo_proyectos');
+  const huellas = axoLeerHuellas('axo_proyectos') || {};
+  let n = 0;
+  axoOrdenarFragmentos(data || []).forEach(r=>{
+    if(axoAplicarFragmento(obj, r, huellas)) n++;
+    axoMarcarVisto('axo_proyectos', r.reg_id, r.actualizado);
+  });
+  const set = window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage);
+  set('axo_proyectos', JSON.stringify(obj));
+  axoGuardarHuellas('axo_proyectos', huellas);
+  return n;
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// Subida de obras: fragmento por fragmento, con la guardia adelante
+// ═══════════════════════════════════════════════════════════════════════
+async function axoSubirProyectos(){
+  if(!supa) return false;
+  const obj = axoLeerModulo('axo_proyectos');
+  const previas = axoLeerHuellas('axo_proyectos');
+
+  // Foto de como quedaria todo partido
+  const actuales = {}, datos = {};
+  Object.keys(obj).forEach(nombre=>{
+    const frags = axoPartirProyecto(nombre, obj[nombre]);
+    Object.keys(frags).forEach(id=>{ actuales[id] = axoHuella(frags[id]); datos[id] = frags[id]; });
+  });
+
+  // Primera vez en este dispositivo: solo tomamos la huella, no subimos nada.
+  if(previas === null){
+    axoGuardarHuellas('axo_proyectos', actuales);
+    console.info('[fragmentos] primera huella - ' + Object.keys(actuales).length + ' fragmento(s), no se subio nada a proposito');
+    return true;
+  }
+
+  const ahora = new Date().toISOString();
+  const quien = window.__axoUsuarioActual || '';
+  const filas = [], confirmar = {};
+
+  Object.keys(actuales).forEach(id=>{
+    if(previas[id] === actuales[id]) return;
+    // Un fragmento que quedo vacio pero antes tenia algo no se sube: seria el
+    // mismo patron que vacio Gabinete y Proveedores el 05/08. Se reintenta solo
+    // en el proximo guardado, o se da de baja explicitamente mas abajo.
+    if(previas[id] !== undefined && axoVacioObj(datos[id])) return;
+    filas.push({ modulo:'axo_proyectos', reg_id:id, datos:datos[id], borrado:false, actualizado:ahora, quien:quien });
+    confirmar[id] = actuales[id];
+  });
+  // Lo que estaba y ya no esta: baja logica, nunca un borrado a ciegas
+  Object.keys(previas).forEach(id=>{
+    if(id in actuales) return;
+    filas.push({ modulo:'axo_proyectos', reg_id:id, datos:null, borrado:true, actualizado:ahora, quien:quien });
+    confirmar[id] = null;
+  });
+
+  if(!filas.length) return true;
+
+  // ── LA GUARDIA ──
+  // Si ya hay un cartel de choque abierto, no volvemos a preguntarle a la nube
+  // en cada tecla: se espera a que ella decida.
+  if(document.getElementById('axo-choque')) return false;
+  if(!window.__axoForzarSubida){
+    let g;
+    try{ g = await axoDetectarChoques('axo_proyectos', filas.map(f=>f.reg_id)); }
+    catch(e){ g = { error:e, choques:[] }; }
+    if(g.error){
+      console.warn('[guardia] no se pudo comparar con la nube, no se sube nada', g.error);
+      return false;   // ante la duda no se pisa: se reintenta en el proximo guardado
+    }
+    if(g.choques.length){
+      console.warn('[guardia] ' + g.choques.length + ' fragmento(s) cambiados por otra persona - no se subio');
+      axoMostrarChoque(g.choques);
+      return false;
+    }
+  }
+
+  const { error } = await supa.from('axo_registros').upsert(filas, { onConflict:'modulo,reg_id' });
+  if(error){ console.warn('[fragmentos] error subiendo', error); return false; }
+
+  // Confirmado: actualizo huellas y marcas de tiempo SOLO de lo que subio
+  const huellas = axoLeerHuellas('axo_proyectos') || {};
+  const vistos = axoLeerVistos() || {};
+  Object.keys(confirmar).forEach(id=>{
+    if(confirmar[id] === null) delete huellas[id]; else huellas[id] = confirmar[id];
+    vistos['axo_proyectos|' + id] = ahora;
+  });
+  axoGuardarHuellas('axo_proyectos', huellas);
+  axoGuardarVistos(vistos);
+  console.info('[fragmentos] subidos ' + filas.length + ' fragmento(s) de obra');
+  return true;
+}
+
+
 // Huella corta y estable de un registro, para saber si cambio sin guardar una copia entera
 function axoHuella(obj){
   const t = JSON.stringify(obj === undefined ? null : obj);
@@ -3281,6 +3623,9 @@ function axoLeerModulo(clave){
 // Nunca manda el modulo entero, asi que no puede pisar lo que hizo otra persona.
 async function axoSubirRegistros(clave){
   if(!supa || !axoEsModuloRegistro(clave)) return false;
+  // Las obras no viajan enteras: van partidas en presupuesto, seguimiento,
+  // cronograma y una fila por compra. Ver el bloque de fragmentos mas abajo.
+  if(clave === 'axo_proyectos') return await axoSubirProyectos();
   const obj = axoLeerModulo(clave);
   const previas = axoLeerHuellas(clave);
 
@@ -3337,11 +3682,22 @@ async function axoBajarRegistros(){
   data.forEach(r=>{ (porModulo[r.modulo] = porModulo[r.modulo] || []).push(r); });
 
   let cambios = 0, sinEspacio = [];
+  const vistosNuevos = axoLeerVistos() || {};
   Object.keys(porModulo).forEach(mod=>{
     if(!axoEsModuloRegistro(mod)) return;
     const obj = axoLeerModulo(mod);
     const huellas = axoLeerHuellas(mod) || {};
-    porModulo[mod].forEach(r=>{
+    // Las obras bajan partidas: la base primero, despues sus pedazos
+    const filasMod = (mod === 'axo_proyectos') ? axoOrdenarFragmentos(porModulo[mod]) : porModulo[mod];
+    filasMod.forEach(r=>{
+      // Toda fila que baja queda marcada como "vista". Es lo que despues le
+      // permite a la guardia distinguir lo que este equipo ya conoce de lo
+      // que modifico otra persona mientras tanto.
+      vistosNuevos[mod + '|' + r.reg_id] = r.actualizado;
+      if(mod === 'axo_proyectos' && (String(r.reg_id).indexOf(AXO_SEP) !== -1 || (r.datos && r.datos.__axoPartido))){
+        if(axoAplicarFragmento(obj, r, huellas)) cambios++;
+        return;
+      }
       if(r.borrado){
         if(Object.prototype.hasOwnProperty.call(obj, r.reg_id)){ delete obj[r.reg_id]; delete huellas[r.reg_id]; cambios++; }
       } else {
@@ -3354,6 +3710,7 @@ async function axoBajarRegistros(){
     axoGuardarHuellas(mod, huellas);
   });
 
+  axoGuardarVistos(vistosNuevos);
   try{ set('axo_ultima_sync_reg', data[data.length-1].actualizado); }catch(e){}
   return { cambios:cambios, error:null, sinEspacio:sinEspacio };
 }
