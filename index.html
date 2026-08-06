@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-frag1</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-frag2</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -17142,8 +17142,21 @@ async function marcarDocumentoDescargado(tipo) {
       try{
         const v = localStorage.getItem(k);
         if(v === null){ if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k); _desmarcarPendiente(k); continue; }
-        const { error } = await supa.from('axo_datos').upsert({ clave:k, valor:JSON.parse(v), actualizado:new Date().toISOString() });
-        if(error) throw error;
+        // 06/08/2026 — ACA ESTABA LA FUGA.
+        // Este interceptor es el camino por el que se guarda TODO lo automatico:
+        // cada tecla en Compras, en el computo, en el cronograma. Y subia siempre
+        // el bloque entero a axo_datos, salteandose por completo el motor de
+        // registros que se instalo el 05/08.
+        // Resultado: las obras subian como bloque, pero la bajada ignora ese
+        // bloque a proposito (para no pisar los registros) — asi que lo que se
+        // cargaba en Compras no llegaba nunca al otro equipo.
+        // Los unicos modulos que sincronizaban de verdad eran los que llaman a
+        // subirNube() a mano: CRM, clientes, proveedores y banco. Por eso la
+        // prueba del CRM de anoche paso y Compras no.
+        // Ahora todo pasa por subirNube(), que sabe si la clave va por registros
+        // (y las obras, fragmento por fragmento) o como bloque.
+        const ok = await subirNube(k);
+        if(!ok) throw new Error('no se pudo subir ' + k);
         reintentosSeguidos[k] = 0;
         avisoMostrado[k] = false;
         if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k);
