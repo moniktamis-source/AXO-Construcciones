@@ -3223,16 +3223,146 @@ function aplicarRolUsuario(email){
 // SINCRONIZACIÓN con la nube (Supabase)
 // Claves que se sincronizan (datos compartidos de la empresa)
 // ════════════════════════════════════════════════════════
-const CLAVES_SYNC = ['axo_proyectos','axo_gabinete','axo_relevamientos','axo_plantillas','axo_actividad','axo_especificaciones','axo_banco','axo_clientes','axo_proveedores','axo_crm','axo_crm_planner'];
+// 05/08/2026: faltaban 4 claves que el sistema usa pero nunca subian a la nube.
+// Vivian SOLO en el dispositivo donde se cargaron y ningun otro equipo las veia:
+//   axo_desperdicio        -> % de desperdicio por material (Lista de Compra)
+//   axo_presentaciones     -> unidad de compra por material (bolsa, tumba, etc.)
+//   axo_crm_plantillas     -> plantillas de mensajes del CRM
+//   axo_crm_plantillas_seg -> plantillas de seguimiento
+const CLAVES_SYNC = ['axo_proyectos','axo_gabinete','axo_relevamientos','axo_plantillas','axo_actividad','axo_especificaciones','axo_banco','axo_clientes','axo_proveedores','axo_crm','axo_crm_planner','axo_crm_plantillas','axo_crm_plantillas_seg','axo_desperdicio','axo_presentaciones'];
 // Claves con un guardado local pendiente de confirmar en la nube (subida en curso o en cola).
 // La sincronización de bajada (sincronizarDesdeNube, cada 20s) NUNCA debe pisar una de estas —
 // si lo hace, un cambio recién guardado localmente desaparece porque llega la versión vieja de la nube
 // antes de que la subida termine. Compartido entre el interceptor de subida (al final del archivo) y la bajada.
 window.__axoClavesEnVuelo = new Set();
 
+// ═══════════════════════════════════════════════════════════════════
+// SINCRONIZACION POR REGISTRO  (05/08/2026)
+//
+// El problema que resuelve: hasta hoy, todo un modulo era UNA fila en la
+// nube. Guardar un lead reescribia los 200 con la copia de ese dispositivo.
+// Por eso dos personas trabajando se borraban entre si: la nube no veia dos
+// cambios distintos, veia dos versiones completas y se quedaba con la ultima.
+//
+// Ahora cada proyecto, lead, cliente y relevamiento es su propia fila en
+// axo_registros. Se sube SOLO lo que cambio, comparando contra una huella
+// local de la ultima sincronizacion. Bajar FUSIONA registro por registro en
+// vez de reemplazar el bloque entero.
+//
+// La logica del sistema no cambia: por dentro sigue trabajando con el mismo
+// objeto de siempre en localStorage. Lo unico distinto es que sube y baja de
+// la nube.
+// ═══════════════════════════════════════════════════════════════════════
+const AXO_MODULOS_REGISTRO = ['axo_proyectos','axo_crm','axo_clientes','axo_proveedores','axo_relevamientos','axo_especificaciones','axo_gabinete','axo_plantillas'];
+function axoEsModuloRegistro(clave){ return AXO_MODULOS_REGISTRO.indexOf(clave) !== -1; }
+
+// Huella corta y estable de un registro, para saber si cambio sin guardar una copia entera
+function axoHuella(obj){
+  const t = JSON.stringify(obj === undefined ? null : obj);
+  let h = 5381;
+  for(let i=0;i<t.length;i++){ h = ((h<<5) + h + t.charCodeAt(i)) | 0; }
+  return h.toString(36) + ':' + t.length;
+}
+function axoLeerHuellas(clave){ try{ return JSON.parse(localStorage.getItem('axo_h_'+clave)||'null'); }catch(e){ return null; } }
+function axoGuardarHuellas(clave, h){
+  try{
+    const set = window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage);
+    set('axo_h_'+clave, JSON.stringify(h));
+  }catch(e){ console.warn('[registros] no se pudieron guardar las huellas de', clave, e && e.name); }
+}
+function axoLeerModulo(clave){
+  try{
+    const o = JSON.parse(localStorage.getItem(clave)||'{}');
+    return (o && typeof o === 'object' && !Array.isArray(o)) ? o : {};
+  }catch(e){ return {}; }
+}
+
+// Sube SOLO los registros que cambiaron en este dispositivo.
+// Nunca manda el modulo entero, asi que no puede pisar lo que hizo otra persona.
+async function axoSubirRegistros(clave){
+  if(!supa || !axoEsModuloRegistro(clave)) return false;
+  const obj = axoLeerModulo(clave);
+  const previas = axoLeerHuellas(clave);
+
+  // Primera vez en este dispositivo: NO subimos nada. Solo tomamos la huella
+  // de lo que hay. Si subieramos, un equipo con una copia vieja impondria
+  // todos sus registros sobre los de los demas — exactamente el error de hoy.
+  if(previas === null){
+    const iniciales = {};
+    Object.keys(obj).forEach(id=>{ iniciales[id] = axoHuella(obj[id]); });
+    axoGuardarHuellas(clave, iniciales);
+    console.info('[registros] primera huella de', clave, '-', Object.keys(iniciales).length, 'registros (no se subio nada, a proposito)');
+    return true;
+  }
+
+  const actuales = {}, filas = [];
+  const ahora = new Date().toISOString();
+  const quien = window.__axoUsuarioActual || '';
+
+  Object.keys(obj).forEach(id=>{
+    const h = axoHuella(obj[id]);
+    actuales[id] = h;
+    if(previas[id] !== h) filas.push({ modulo:clave, reg_id:id, datos:obj[id], borrado:false, actualizado:ahora, quien:quien });
+  });
+  // Los que estaban y ya no estan: baja logica, nunca un borrado a ciegas
+  Object.keys(previas).forEach(id=>{
+    if(!(id in actuales)) filas.push({ modulo:clave, reg_id:id, datos:null, borrado:true, actualizado:ahora, quien:quien });
+  });
+
+  if(!filas.length) return true;
+
+  const { error } = await supa.from('axo_registros').upsert(filas, { onConflict:'modulo,reg_id' });
+  if(error){ console.warn('[registros] error subiendo', clave, error); return false; }
+
+  axoGuardarHuellas(clave, actuales);
+  console.info('[registros] subidos', filas.length, 'registro(s) de', clave);
+  return true;
+}
+
+// Baja solo lo que cambio desde la ultima vez y lo FUSIONA registro por registro.
+async function axoBajarRegistros(){
+  if(!supa) return { cambios:0, error:null };
+  const desde = localStorage.getItem('axo_ultima_sync_reg') || '1970-01-01T00:00:00+00:00';
+  const { data, error } = await supa
+    .from('axo_registros')
+    .select('modulo,reg_id,datos,borrado,actualizado')
+    .gt('actualizado', desde)
+    .order('actualizado', { ascending:true });
+
+  if(error){ console.warn('[registros] error bajando', error); return { cambios:0, error:error }; }
+  if(!data || !data.length) return { cambios:0, error:null };
+
+  const set = window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage);
+  const porModulo = {};
+  data.forEach(r=>{ (porModulo[r.modulo] = porModulo[r.modulo] || []).push(r); });
+
+  let cambios = 0, sinEspacio = [];
+  Object.keys(porModulo).forEach(mod=>{
+    if(!axoEsModuloRegistro(mod)) return;
+    const obj = axoLeerModulo(mod);
+    const huellas = axoLeerHuellas(mod) || {};
+    porModulo[mod].forEach(r=>{
+      if(r.borrado){
+        if(Object.prototype.hasOwnProperty.call(obj, r.reg_id)){ delete obj[r.reg_id]; delete huellas[r.reg_id]; cambios++; }
+      } else {
+        const h = axoHuella(r.datos);
+        if(huellas[r.reg_id] !== h){ obj[r.reg_id] = r.datos; huellas[r.reg_id] = h; cambios++; }
+      }
+    });
+    try{ set(mod, JSON.stringify(obj)); }
+    catch(e){ sinEspacio.push(mod); console.warn('[registros] no entro en este dispositivo:', mod, e && e.name); return; }
+    axoGuardarHuellas(mod, huellas);
+  });
+
+  try{ set('axo_ultima_sync_reg', data[data.length-1].actualizado); }catch(e){}
+  return { cambios:cambios, error:null, sinEspacio:sinEspacio };
+}
+
 // Sube una clave a la nube
 async function subirNube(clave){
   if(!supa) return false;
+  // Los modulos migrados ya no viajan como bloque: van registro por registro.
+  if(axoEsModuloRegistro(clave)) return await axoSubirRegistros(clave);
   try{
     const valor = localStorage.getItem(clave);
     if(valor === null) return false;
@@ -3384,9 +3514,16 @@ const AXO_RENDER_TAB = {
   'dashproyecto':         ['renderDashProyecto'],
   'banco':                ['renderBanco'],
   'compras':              ['renderComprasCompleto'],
-  'costeo':               ['renderCosteo'],
+  // Costeo y Etapas NO se repintan con renderCosteo/renderEtapas sueltos:
+  // renderEtapas(pf, cdByEtapa, ...) necesita 4 argumentos calculados, y la
+  // tarjeta de ALERTAS DE SUBA DE PRECIOS (card-alertas-precio, que vive en
+  // Costeo) solo la dibuja renderAlertasPrecio(), a la que llama recalcular().
+  // recalcular() es el punto de entrada correcto: recalcula y llama a
+  // renderEtapas, renderOfertaEtapas, renderLiquidez, renderAlertasGlobal,
+  // renderAlertasPrecio y renderVencimientos con los valores buenos.
+  'costeo':               ['recalcular'],
   'flujo':                ['renderFlujo'],
-  'etapas':               ['renderEtapas'],
+  'etapas':               ['recalcular'],
   'adjudicados':          ['renderAdjudicados'],
   'comparativo':          ['renderComparativo'],
   'histprecios':          ['renderHistPrecios'],
@@ -3430,7 +3567,16 @@ async function sincronizarDesdeNube(opts){
 
     let cambiadas = 0;
     const sinEspacio = [];
+
+    // Primero los modulos migrados: se fusionan registro por registro.
+    try{
+      const r = await axoBajarRegistros();
+      cambiadas += (r.cambios || 0);
+      if(r.sinEspacio && r.sinEspacio.length) sinEspacio.push.apply(sinEspacio, r.sinEspacio);
+    }catch(e){ console.warn('[registros] fusion', e); }
+
     data.forEach(row=>{
+      if (axoEsModuloRegistro(row.clave)) return; // ya se fusiono arriba, no lo pisamos con el bloque viejo
       if (window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(row.clave)) return; // hay un cambio local subiendo todavia
       const nuevo = JSON.stringify(row.valor);
       if(localStorage.getItem(row.clave) === nuevo) return; // ya estaba igual
@@ -3549,12 +3695,55 @@ function mostrarDetalleEspacio(e){
   alert('Espacio en tu nube\n\nUsado: '+e.totalMB.toFixed(1)+' MB de '+LIMITE_MB+' MB ('+Math.round(e.pct)+'%)\nFotos (aprox): '+e.fotosMB.toFixed(1)+' MB\n\nLo que mas ocupa:\n'+lista+'\n\nConsejo: las fotos son lo mas pesado. Para mas espacio, podes ampliar el plan de Supabase o borrar fotos antiguas.');
 }
 
+// 05/08/2026 — ANTES este boton subia a ciegas TODAS las claves de este
+// dispositivo encima de la nube, sin mirar que habia del otro lado. Era el
+// mismo defecto que causo el desastre de las 19:00, pero a un clic de distancia.
+// Ahora compara contra la nube, se saltea lo que pisaria datos ajenos, y avisa
+// exactamente que subio y que no.
 async function subirTodoNube(){
-  if(!supa){ alert('No hay conexión con la nube.'); return; }
-  for(const k of CLAVES_SYNC){ await subirNube(k); }
+  if(!supa){ alert('No hay conexion con la nube.'); return; }
+
+  let ts = {};
+  try{ ts = JSON.parse(localStorage.getItem('axo_ts_local')||'{}'); }catch(e){ ts = {}; }
+
+  let nube = {};
+  try{
+    const { data, error } = await supa.from('axo_datos').select('clave,valor,actualizado').in('clave', CLAVES_SYNC);
+    if(error) throw error;
+    (data||[]).forEach(r=>{ nube[r.clave] = r; });
+  }catch(e){
+    alert('No se pudo leer la nube para comparar, asi que no se subio nada.\n\n' + (e && e.message ? e.message : e) + '\n\nEs a proposito: subir sin comparar es lo que borra el trabajo de la otra persona.');
+    return;
+  }
+
+  const subidas = [], saltadas = [];
+  for(const k of CLAVES_SYNC){
+    const local = localStorage.getItem(k);
+    if(local === null) continue;
+    const enNube = nube[k];
+    if(enNube){
+      if(esVacioAxo(local) && !esVacioAxo(JSON.stringify(enNube.valor))){
+        saltadas.push(k + ': vacio aca, con datos en la nube'); continue;
+      }
+      const tLocal = ts[k] ? Date.parse(ts[k]) : 0;
+      const tNube  = enNube.actualizado ? Date.parse(enNube.actualizado) : 0;
+      if(tNube && (!tLocal || tNube > tLocal)){
+        saltadas.push(k + ': la nube es mas nueva'); continue;
+      }
+    }
+    if(await subirNube(k)) subidas.push(k); else saltadas.push(k + ': fallo la subida');
+  }
   await subirLibrosNube();
-  if(typeof mostrarToastGuardado==='function') mostrarToastGuardado('Datos subidos a la nube ☁');
-  else alert('Datos subidos a la nube.');
+
+  if(saltadas.length){
+    alert('Subida parcial — a proposito.\n\nSubidas (' + subidas.length + '): ' + (subidas.join(', ')||'ninguna') +
+          '\n\nNO subidas (' + saltadas.length + '), para no borrar datos mas nuevos:\n  ' + saltadas.join('\n  ') +
+          '\n\nSi de verdad querias imponer esta copia, avisá antes de forzarlo.');
+  } else if(typeof mostrarToastGuardado==='function'){
+    mostrarToastGuardado('Subido a la nube — ' + subidas.length + ' modulo(s)');
+  } else {
+    alert('Datos subidos a la nube (' + subidas.length + ' modulos).');
+  }
 }
 
 // El cartel de exito ahora lo decide sincronizarDesdeNube segun lo que REALMENTE paso.
@@ -4983,8 +5172,15 @@ function renderAlertasPrecio() {
   if (!alertas.length) {
     const congelados = (snapshotAprobado.preciosInsumos && typeof snapshotAprobado.preciosInsumos === 'object')
       ? Object.keys(snapshotAprobado.preciosInsumos).length : 0;
+    // 05/08/2026 (pedido de Monica): si NO hubo subas, la tarjeta no se muestra.
+    // Solo interesa la alerta ROJA: precio que subio mas de 15% respecto del
+    // congelado al aprobar. El panel verde "sin subas" era ruido en pantalla.
+    if (congelados > 0) { card.style.display = 'none'; return; }
+    // El caso amarillo SI se mantiene: un proyecto aprobado sin precios congelados
+    // no es "no hubo subas", es que no hay con que comparar. Ocultarlo en silencio
+    // es lo que hacia imposible darse cuenta del problema.
     card.style.display = 'block';
-    if (head) head.style.background = congelados > 0 ? '#4A6741' : '#B58900';
+    if (head) head.style.background = '#B58900';
     const fechaSnap = snapshotAprobado.fecha ? new Date(snapshotAprobado.fecha).toLocaleDateString('es-PY') : '—';
     if (congelados > 0) {
       // Diagnóstico: mostrar las mayores variaciones aunque no lleguen al 15%, para poder
@@ -16555,6 +16751,9 @@ async function marcarDocumentoDescargado(tipo) {
 // (esto es lo que causaba que Relevamiento pareciera "borrarse solo").
 (function(){
   const _setItem = localStorage.setItem.bind(localStorage);
+  // El motor de registros necesita escribir en localStorage SIN volver a
+  // disparar una subida (si no, bajar de la nube dispararia subir lo mismo).
+  window.__axoSetItemDirecto = _setItem;
   let pendientes = {};
   let timer = null;
   let reintentosSeguidos = {}; // clave -> cuántas veces falló seguido
