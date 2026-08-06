@@ -646,7 +646,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-sm" style="background:#fff;color:var(--verde);font-weight:700" onclick="showTabPorNombre('proyectos')">🔄 Cambiar proyecto</button>
   <span id="indicador-espacio" style="margin-left:8px;display:inline-flex;align-items:center" title="Espacio en la nube"></span>
-  <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="bajarTodoNube()" title="Sube lo que tengas pendiente y trae los cambios de otros usuarios desde la nube">🔄 Refrescar</button>
+  <button id="btn-actualizar" class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px;min-width:118px" onclick="actualizarAhora(this)" title="Sube lo que tengas pendiente y trae los cambios de los otros equipos">🔄 Actualizar</button>
   <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="axoLogout()" title="Cerrar sesión">🔒 Salir</button>
 </div>
 
@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-media</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-guardado</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -1385,7 +1385,10 @@
   <div class="card">
     <div class="card-header verde2">
       CRONOGRAMA DE SEGUIMIENTO (EJECUCIÓN REAL)
-      <button class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:#fff" onclick="copiarPlanAReal(true)">↺ Copiar del planificado</button>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:#fff" onclick="copiarPlanAReal(true)">↺ Copiar del planificado</button>
+        <button class="btn btn-sm" style="background:#fff;color:var(--verde);font-weight:700" onclick="guardarCronogramaReal(this)" title="Los cambios se guardan solos, esto es para confirmarlo a mano">💾 Guardar</button>
+      </div>
     </div>
     <div class="card-body">
       <div class="grid-4">
@@ -1999,10 +2002,25 @@ function nombreCortoUsuario(email){
   return email.split('@')[0];
 }
 // Registra una acción en el log general (se sincroniza a la nube)
+// 06/08/2026 — el autoguardado corre cada 400ms mientras escribis, y cada
+// guardado anotaba "Actualizado: Proyectos" en la bitacora. Escribiendo un
+// rato la bitacora quedaba con 300 renglones identicos y empujaba afuera todo
+// lo que de verdad importaba; ademas cada anotacion dispara una subida a la
+// nube. Ahora, si la misma accion ya se anoto hace menos de 2 minutos, se
+// actualiza la hora del renglon que ya estaba en vez de agregar otro.
+const AXO_ACTIVIDAD_AGRUPAR_MS = 120000;
 function registrarActividad(accion, detalle){
   try{
     let log = JSON.parse(localStorage.getItem('axo_actividad')||'[]');
-    log.unshift({ usuario: usuarioActual(), accion, detalle: detalle||'', fecha: new Date().toISOString() });
+    const ahora = new Date();
+    const ultimo = log[0];
+    if(ultimo && ultimo.accion === accion && (ultimo.detalle||'') === (detalle||'') &&
+       ultimo.usuario === usuarioActual() &&
+       (ahora - new Date(ultimo.fecha)) < AXO_ACTIVIDAD_AGRUPAR_MS){
+      ultimo.fecha = ahora.toISOString();
+    } else {
+      log.unshift({ usuario: usuarioActual(), accion, detalle: detalle||'', fecha: ahora.toISOString() });
+    }
     if(log.length > 300) log = log.slice(0,300); // máximo 300 registros
     localStorage.setItem('axo_actividad', JSON.stringify(log));
   }catch(e){}
@@ -4000,10 +4018,33 @@ async function axoBajarRegistros(){
   const porModulo = {};
   data.forEach(r=>{ (porModulo[r.modulo] = porModulo[r.modulo] || []).push(r); });
 
-  let cambios = 0, sinEspacio = [];
+  let cambios = 0, sinEspacio = [], pospuestos = [];
   const vistosNuevos = axoLeerVistos() || {};
   Object.keys(porModulo).forEach(mod=>{
     if(!axoEsModuloRegistro(mod)) return;
+
+    // ── 06/08/2026 — ACA SE PERDIAN LOS GUARDADOS ──
+    // Cuando guardas algo, el sistema lo escribe en el equipo y lo marca "en
+    // vuelo" hasta confirmar que subio a la nube. La bajada de axo_datos
+    // respetaba esa marca y no pisaba nada. Pero la bajada POR REGISTROS —que
+    // es por donde viajan Proyectos, Compras, Flujo de Caja, CRM, Clientes,
+    // Proveedores, Relevamientos, Especificaciones, Gabinete y Plantillas, o
+    // sea casi todo— nunca la consultaba.
+    //
+    // Resultado: guardabas en Flujo de Caja, el sistema decia "Guardado ✓"
+    // (y era cierto, estaba guardado en el equipo), y segundos despues la
+    // sincronizacion automatica de cada 20s bajaba la version de la nube
+    // encima, antes de que la tuya llegara a subir. El cambio desaparecia sin
+    // ningun aviso. Por eso parecia un guardado fantasma.
+    //
+    // Ahora ese modulo se saltea y se vuelve a intentar en la proxima bajada,
+    // cuando la subida ya haya terminado.
+    if(window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(mod)){
+      pospuestos.push(mod);
+      console.info('[registros] ' + mod + ' se posterga: hay un guardado tuyo subiendo todavia');
+      return;
+    }
+
     const obj = axoLeerModulo(mod);
     const huellas = axoLeerHuellas(mod) || {};
     // 06/08/2026 — las marcas de "visto" y el conteo de cambios de ESTE modulo
@@ -4049,12 +4090,16 @@ async function axoBajarRegistros(){
   // perdia esos datos en silencio y de forma permanente, sin ningun aviso.
   // Ahora, si algo no entro, la marca se queda donde estaba y el proximo
   // Refrescar vuelve a pedir esas mismas filas.
-  if(sinEspacio.length){
-    console.warn('[registros] la marca de sincronizacion NO avanza: no entro', sinEspacio.join(', ') + '. Se vuelve a intentar en la proxima bajada.');
+  // La marca tampoco avanza si algun modulo quedo postergado: si avanzara,
+  // esas filas quedarian por debajo y no se volverian a pedir nunca.
+  if(sinEspacio.length || pospuestos.length){
+    console.warn('[registros] la marca de sincronizacion NO avanza. Sin espacio: [' +
+      (sinEspacio.join(', ')||'—') + ']. Postergados por subida en curso: [' +
+      (pospuestos.join(', ')||'—') + ']. Se reintenta en la proxima bajada.');
   } else {
     try{ set('axo_ultima_sync_reg', data[data.length-1].actualizado); }catch(e){}
   }
-  return { cambios:cambios, error:null, sinEspacio:sinEspacio };
+  return { cambios:cambios, error:null, sinEspacio:sinEspacio, pospuestos:pospuestos };
 }
 
 // Sube una clave a la nube
@@ -4252,8 +4297,38 @@ const AXO_RENDER_TAB = {
   'cronograma-ejecucion': ['renderGanttReal']
 };
 
-function repintarTabActivo(){
+// ═══════════════════════════════════════════════════════════════════════
+// RECARGAR EN MEMORIA EL PROYECTO ABIERTO  (06/08/2026)
+//
+// Esta era la razon por la que Refrescar "no hacia nada" y F5 si funcionaba.
+// La bajada de la nube escribe en localStorage — y hasta ahi todo bien, los
+// datos llegaban. Pero la pantalla no lee de localStorage: lee de variables
+// que viven en memoria (ejecucion, cronograma, cronogramaReal, adjudicaciones,
+// movimientos...). Esas variables se cargan UNA sola vez, cuando se abre el
+// proyecto. Nadie las volvia a llenar despues de sincronizar.
+//
+// Resultado: los datos de Compras bajaban correctamente, quedaban guardados,
+// y la pantalla seguia mostrando lo viejo. Al apretar F5 el sistema volvia a
+// leer todo desde localStorage y recien ahi aparecian.
+// ═══════════════════════════════════════════════════════════════════════
+function axoRecargarProyectoEnMemoria(){
+  if(typeof proyectoActualNombre === 'undefined' || !proyectoActualNombre) return false;
+  // Si hay algo tuyo sin guardar todavia, se guarda primero. Sin esto, recargar
+  // desde localStorage pisaria lo que acabas de escribir.
+  try{
+    if(typeof __axoHayCambiosPendientes !== 'undefined' && __axoHayCambiosPendientes &&
+       typeof guardarProyectoAhora === 'function') guardarProyectoAhora('silencioso');
+  }catch(e){ console.warn('[repintar] no se pudo guardar lo pendiente antes de recargar', e); }
+  let p = null;
+  try{ p = getProyectosGuardados()[proyectoActualNombre]; }catch(e){ return false; }
+  if(!p) return false;
+  try{ aplicarProyectoSerializado(p); return true; }
+  catch(e){ console.warn('[repintar] no se pudo recargar el proyecto en memoria', e); return false; }
+}
+
+function repintarTabActivo(recargarMemoria){
   const fallaron = [];
+  if(recargarMemoria) axoRecargarProyectoEnMemoria();
   try{ if(typeof aplicarBancoGuardado==='function') aplicarBancoGuardado(); }catch(e){ console.warn('[repintar] banco', e); }
   try{ if(typeof refrescarDatalistsCP==='function') refrescarDatalistsCP(); }catch(e){}
   const name = tabActivoNombre();
@@ -4409,7 +4484,7 @@ async function sincronizarDesdeNube(opts){
         const alSalir = function(){
           window.__axoEsperandoFoco = false;
           window.__axoEstado.hayNuevos = false;
-          repintarTabActivo();
+          repintarTabActivo(true);
           pintarEstadoSync();
           document.removeEventListener('focusout', alSalir);
         };
@@ -4420,7 +4495,7 @@ async function sincronizarDesdeNube(opts){
     }
 
     window.__axoEstado.hayNuevos = false;
-    const r = repintarTabActivo();
+    const r = repintarTabActivo(cambiadas > 0);
     pintarEstadoSync();
 
     if(manual){
@@ -4553,6 +4628,23 @@ async function subirTodoNube(){
 // El cartel de exito ahora lo decide sincronizarDesdeNube segun lo que REALMENTE paso.
 // Antes se mostraba "Datos actualizados desde la nube" siempre, incluso cuando
 // la bajada fallaba o no se repintaba ninguna pantalla.
+// El boton de arriba. Tarda unos segundos a proposito: primero sube lo tuyo,
+// despues baja lo de los demas y recien ahi repinta. Mientras tanto se ve que
+// esta trabajando, para no quedarse mirando una pantalla que parece congelada.
+async function actualizarAhora(btn){
+  if(window.__axoActualizando) return;
+  window.__axoActualizando = true;
+  const el = btn || document.getElementById('btn-actualizar');
+  const original = el ? el.innerHTML : '';
+  if(el){ el.innerHTML = '⏳ Actualizando…'; el.disabled = true; }
+  try{ await bajarTodoNube(); }
+  catch(e){ console.warn('[actualizar]', e); }
+  finally{
+    if(el){ el.innerHTML = original || '🔄 Actualizar'; el.disabled = false; }
+    window.__axoActualizando = false;
+  }
+}
+
 async function bajarTodoNube(){
   if(!supa){ alert('No hay conexion con la nube.'); return; }
   // 06/08/2026 — ANTES de bajar, subir lo que quedo pendiente.
@@ -8922,15 +9014,52 @@ function copiarPlanAReal(forzar) {
     // Asegurar que el plan exista
     if (Object.keys(cronograma).length === 0) generarCronograma();
     cronogramaReal = JSON.parse(JSON.stringify(cronograma));
+
+    // ── 06/08/2026 — POR ESTO EL BOTON NO HACIA NADA ──
+    // La copia salia sin la marca _editado. Y renderGanttReal(), unas lineas
+    // mas abajo, vuelve a derivar del plan CUALQUIER rubro que no la tenga.
+    // O sea: se copiaba y acto seguido se pisaba con lo mismo. El boton
+    // parecia roto porque, en los hechos, no cambiaba nada.
+    //
+    // Cuando apretas el boton a proposito lo que queres es una foto del plan
+    // que despues puedas editar sin que el plan te la vuelva a pisar. Por eso
+    // ahora la copia manual queda marcada como propia del cronograma real.
+    // La copia AUTOMATICA (forzar falso, cuando esta vacio) se deja sin marcar
+    // a proposito: asi un cronograma real que nunca tocaste sigue reflejando
+    // los cambios que hagas en el planificado, que es como venia funcionando.
     if (forzar) {
+      Object.keys(cronogramaReal).forEach(function(cod){
+        if (cronogramaReal[cod] && typeof cronogramaReal[cod] === 'object') cronogramaReal[cod]._editado = true;
+      });
       mostrarToastGuardado('Cronograma real copiado del planificado');
     }
     autosaveSeguimiento();
   }
-  renderGanttReal();
-  renderInformeComparativo();
-  renderHitos();
-  renderCortesAdmin();
+  // Cada repintado va aparte: si uno falla, los demas se dibujan igual.
+  // Antes, un error en el informe comparativo dejaba el Gantt sin redibujar y
+  // parecia que el boton no habia hecho nada.
+  [renderGanttReal, renderInformeComparativo, renderHitos, renderCortesAdmin].forEach(function(fn){
+    try{ if(typeof fn === 'function') fn(); }
+    catch(e){ console.warn('[crono real] fallo un repintado', e); }
+  });
+}
+
+// Guardado a mano del cronograma real. Los cambios ya se guardan solos, pero
+// sin un boton visible no hay forma de saberlo: el planificado tiene los suyos
+// y este no tenia ninguno, asi que parecia que no guardaba.
+function guardarCronogramaReal(btn){
+  try{
+    if (typeof guardarProyectoAhora === 'function') guardarProyectoAhora('silencioso');
+    if (btn){
+      const t = btn.innerHTML;
+      btn.innerHTML = '✓ Guardado';
+      setTimeout(function(){ btn.innerHTML = t; }, 1600);
+    }
+    if (typeof mostrarToastGuardado === 'function') mostrarToastGuardado('Cronograma real guardado');
+  }catch(e){
+    console.warn('[crono real] no se pudo guardar', e);
+    alert('No se pudo guardar el cronograma real: ' + (e && e.message ? e.message : e));
+  }
 }
 
 function recalcularCronogramaReal() {
@@ -9266,6 +9395,12 @@ function cambiarFechaInicioReal(valor) {
   }
   renderGanttReal();
   renderInformeComparativo();
+  // 06/08/2026 — ACA FALTABA EL GUARDADO.
+  // Cambiar la fecha de inicio real actualizaba la pantalla pero no guardaba
+  // nada: al salir de la pestana y volver, la fecha estaba como antes.
+  // Inicio y duracion de cada rubro si guardaban (via recalcularCronogramaReal);
+  // la fecha de arriba era la unica que se perdia.
+  autosaveSeguimiento();
 }
 
 // ── INFORME COMPARATIVO: Plan vs Real (tabla, no gráfico) ──
@@ -16353,19 +16488,34 @@ function guardarProyectoAhora(motivo) {
       const cli = (document.getElementById('p-cliente')?.value || '').trim();
       const proy = (document.getElementById('p-proyecto')?.value || '').trim();
       const base = [cli, proy].filter(Boolean).join(' — ');
-      // Sin cliente ni proyecto no hay nada que valga la pena guardar todavía
-      if (!base) { __axoHayCambiosPendientes = false; return false; }
+      // Sin cliente ni proyecto el sistema no sabe bajo que nombre guardar.
+      // ANTES: se apagaba la bandera de "hay cambios pendientes" y se salia en
+      // silencio. O sea que lo que estabas cargando no se guardaba en ningun
+      // lado, nadie te avisaba, y el latido de 45s tampoco lo reintentaba
+      // porque la bandera ya estaba apagada. Ahora se avisa y queda pendiente.
+      if (!base) {
+        axoAvisarNoSeGuardo('completá Cliente y Proyecto arriba. Hasta entonces esto no se guarda.');
+        return false;
+      }
       proyectoActualNombre = base;
     }
     const proyectos = getProyectosGuardados();
     backupProyectoAntesDeGuardar(proyectoActualNombre, proyectos);
     proyectos[proyectoActualNombre] = serializarProyectoActual();
     const ok = guardarProyectosGuardados(proyectos);
-    __axoHayCambiosPendientes = false;
-    if (ok && motivo !== 'silencioso') mostrarToastGuardado('Guardado ✓');
+    // La bandera se apaga SOLO si de verdad se escribio. Antes se apagaba
+    // siempre, incluso cuando el guardado fallaba: el cambio se perdia y no se
+    // volvia a intentar nunca.
+    if (ok) {
+      __axoHayCambiosPendientes = false;
+      if (motivo !== 'silencioso') mostrarToastGuardado('Guardado');
+    } else {
+      axoAvisarNoSeGuardo('no se pudo escribir en este dispositivo. No cierres la pestaña.');
+    }
     return ok;
   } catch(e) {
     console.warn('[Guardado] falló:', e);
+    axoAvisarNoSeGuardo((e && e.message) ? e.message : 'error inesperado');
     return false;
   }
 }
@@ -16373,7 +16523,12 @@ function guardarProyectoAhora(motivo) {
 function autosaveSeguimiento() {
   __axoHayCambiosPendientes = true;
   clearTimeout(__axoAutosaveSeguimientoTimer);
-  __axoAutosaveSeguimientoTimer = setTimeout(() => guardarProyectoAhora(), 400);
+  // 'silencioso': el autoguardado corre en cada tecla, con 400ms de espera.
+  // Sin esto sacaba el cartel "Guardado ✓" cada pocos segundos mientras
+  // escribias — y un cartel que aparece todo el tiempo deja de significar
+  // nada. Los avisos quedan para los botones de guardar y para los ERRORES,
+  // que ahora salen en rojo y son los unicos que interesa leer.
+  __axoAutosaveSeguimientoTimer = setTimeout(() => guardarProyectoAhora('silencioso'), 400);
 }
 
 // Antes de cerrar o recargar: lo pendiente se guarda sí o sí
@@ -16391,18 +16546,35 @@ setInterval(() => {
 }, 45000);
 
 // Pequeño aviso visual no intrusivo (no usa alert, para no interrumpir el flujo de trabajo)
-function mostrarToastGuardado(texto) {
+// 06/08/2026 — el cartel tenia un '✓' fijo pegado adelante, asi que hasta los
+// avisos de error salian como si todo hubiera ido bien ("✓ ⚠️ no se pudo
+// subir"). Ahora el tilde solo aparece cuando de verdad hubo un exito, y los
+// fallos salen en rojo y duran mas, porque son los que hay que leer.
+function mostrarToastGuardado(texto, tipo) {
+  const esError = (tipo === 'error');
   let toast = document.getElementById('axo-toast-guardado');
   if (!toast) {
     toast = document.createElement('div');
     toast.id = 'axo-toast-guardado';
-    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;background:var(--verde);color:#fff;padding:10px 18px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;font-weight:600;z-index:9999;opacity:0;transition:opacity 0.3s';
+    toast.style.cssText = 'position:fixed;bottom:24px;right:24px;color:#fff;padding:10px 18px;border-radius:8px;box-shadow:var(--shadow-lg);font-size:13px;font-weight:600;z-index:9999;opacity:0;transition:opacity 0.3s;max-width:340px;line-height:1.4';
     document.body.appendChild(toast);
   }
-  toast.textContent = '✓ ' + texto;
+  toast.style.background = esError ? 'var(--red)' : 'var(--verde)';
+  toast.textContent = esError ? ('⚠ ' + texto) : ('✓ ' + texto);
   toast.style.opacity = '1';
   clearTimeout(window.__axoToastTimer);
-  window.__axoToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, 2000);
+  window.__axoToastTimer = setTimeout(() => { toast.style.opacity = '0'; }, esError ? 6000 : 2000);
+}
+
+// Aviso de que algo NO se guardo. Se limita a uno cada 8 segundos: si no,
+// escribiendo en una tabla saldria en cada tecla y no se leeria ninguno.
+let __axoUltimoAvisoFallo = 0;
+function axoAvisarNoSeGuardo(texto) {
+  console.warn('[Guardado] ' + texto);
+  const ahora = Date.now();
+  if (ahora - __axoUltimoAvisoFallo < 8000) return;
+  __axoUltimoAvisoFallo = ahora;
+  if (typeof mostrarToastGuardado === 'function') mostrarToastGuardado('NO se guardó — ' + texto, 'error');
 }
 
 function nuevoProyectoVacio() {
