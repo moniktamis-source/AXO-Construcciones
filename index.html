@@ -646,7 +646,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-sm" style="background:#fff;color:var(--verde);font-weight:700" onclick="showTabPorNombre('proyectos')">🔄 Cambiar proyecto</button>
   <span id="indicador-espacio" style="margin-left:8px;display:inline-flex;align-items:center" title="Espacio en la nube"></span>
-  <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="sincronizarDesdeNube()" title="Trae los cambios de otros usuarios desde la nube">🔄 Refrescar</button>
+  <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="bajarTodoNube()" title="Sube lo que tengas pendiente y trae los cambios de otros usuarios desde la nube">🔄 Refrescar</button>
   <button class="btn btn-sm" style="background:rgba(255,255,255,0.15);color:#fff;font-weight:600;margin-left:8px" onclick="axoLogout()" title="Cerrar sesión">🔒 Salir</button>
 </div>
 
@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-frag2</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-media</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -1961,17 +1961,33 @@ window.addEventListener('load', chequearModoCliente);
 
 // ════════════════════════════════════════════════════════
 // CONTROL DE ACCESO — total / parcial
-// Los emails de esta lista tienen acceso PARCIAL (solo Relevamiento y Libro de Obra).
-// Cualquier otro email = acceso TOTAL.
-// Para agregar un usuario de obra: poné su email en minúsculas en esta lista.
+//
+// 06/08/2026 — LISTA BLANCA. Antes la regla era al revés: solo los emails de
+// EMAILS_PARCIALES quedaban limitados y "cualquier otro email = acceso TOTAL".
+// Eso significaba que cualquier usuario nuevo que se pudiera autenticar en
+// Supabase entraba con acceso completo si nadie se acordaba de anotarlo abajo.
+// Ahora es al revés y falla del lado seguro: SOLO los emails de EMAILS_ADMIN
+// tienen acceso total. Todo lo demás — incluido un email desconocido, uno mal
+// escrito o una sesión sin email — queda en acceso parcial.
+//
+// Para dar acceso TOTAL a alguien: agregá su email en minúsculas a EMAILS_ADMIN.
+// Para dar acceso de obra: alcanza con crearle el usuario y NO tocar nada acá.
 // ════════════════════════════════════════════════════════
+const EMAILS_ADMIN = [
+  'axo.info.py@gmail.com',
+  'monica@axo.com',
+  'daity@axo.com',
+];
+
+// Se conserva solo como referencia de quién es usuario de obra conocido.
+// La decisión de acceso ya NO depende de esta lista.
 const EMAILS_PARCIALES = [
   'obra@axo.com',
 ];
 
 function esUsuarioParcial(email){
-  if(!email) return false;
-  return EMAILS_PARCIALES.includes(email.toLowerCase().trim());
+  if(!email) return true;                     // sin email identificado: parcial
+  return !EMAILS_ADMIN.includes(email.toLowerCase().trim());
 }
 
 // ── AUDITORÍA ──
@@ -3230,6 +3246,33 @@ function aplicarRolUsuario(email){
 //   axo_crm_plantillas     -> plantillas de mensajes del CRM
 //   axo_crm_plantillas_seg -> plantillas de seguimiento
 const CLAVES_SYNC = ['axo_proyectos','axo_gabinete','axo_relevamientos','axo_plantillas','axo_actividad','axo_especificaciones','axo_banco','axo_clientes','axo_proveedores','axo_crm','axo_crm_planner','axo_crm_plantillas','axo_crm_plantillas_seg','axo_desperdicio','axo_presentaciones'];
+
+// axo_proyectos_backup NO entra aca — y es a proposito.
+// 06/08/2026: se lo agrego para que el historial de Deshacer viajara entre
+// equipos, y fue un error. Ese bloque tiene hasta 5 copias COMPLETAS de cada
+// obra: subirlo entero en cada guardado infla localStorage y la nube sin dar
+// nada nuevo, porque la base de datos YA guarda 90 dias de todas las versiones
+// (axo_registros_historial / axo_datos_historial, ver 01_red_de_seguridad.sql).
+// Si hace falta recuperar una version vieja se saca de ahi, no de esta copia.
+// El historial de Deshacer se queda local, que es para lo que sirve: deshacer
+// el ultimo guardado en el equipo donde se hizo.
+
+// ── CLAVES DINAMICAS  (06/08/2026) ─────────────────────────────────────
+// Libro de Obra e Informe Cliente no tienen un nombre de clave fijo: se arma
+// con el cliente y el proyecto (axo_libro_Perez_Casa, axo_informe_Perez_Casa).
+// Por eso no pueden figurar en CLAVES_SYNC, que es una lista cerrada.
+// El Libro ya estaba contemplado a mano en el interceptor; el Informe NO, y
+// por eso el borrador del informe (fotos ocultas, pies de foto, comentario)
+// nunca salia del navegador donde se armaba. Ahora los dos se reconocen por
+// prefijo, en un solo lugar, para que no se vuelva a olvidar ninguno.
+const AXO_PREFIJOS_SYNC = ['axo_libro_','axo_informe_'];
+function axoEsClaveDinamica(clave){
+  if(!clave) return false;
+  for(let i=0;i<AXO_PREFIJOS_SYNC.length;i++){
+    if(String(clave).indexOf(AXO_PREFIJOS_SYNC[i]) === 0) return true;
+  }
+  return false;
+}
 // Claves con un guardado local pendiente de confirmar en la nube (subida en curso o en cola).
 // La sincronización de bajada (sincronizarDesdeNube, cada 20s) NUNCA debe pisar una de estas —
 // si lo hace, un cambio recién guardado localmente desaparece porque llega la versión vieja de la nube
@@ -3253,6 +3296,220 @@ window.__axoClavesEnVuelo = new Set();
 // objeto de siempre en localStorage. Lo unico distinto es que sube y baja de
 // la nube.
 // ═══════════════════════════════════════════════════════════════════════
+// ── ACTIVIDAD: SE FUSIONA, NO SE PISA  (06/08/2026) ────────────────────
+// axo_actividad es una bitacora append-only: cada linea es un hecho que ya
+// ocurrio (quien, que, cuando) y no se edita nunca mas. Pero viajaba como
+// bloque entero, asi que la ultima en guardar borraba las lineas de la otra:
+// si Monica cargaba Compras y Daissy tocaba el CRM, una de las dos historias
+// desaparecia sin aviso.
+// No hace falta migrarla al motor de registros ni cambiarle la forma: como
+// las lineas son inmutables, alcanza con unir las dos listas, ordenar por
+// fecha y quedarse con las 300 mas nuevas (el mismo tope que ya tenia).
+// Se fusiona en los DOS sentidos: al bajar y al subir. Por eso la subida de
+// actividad nunca puede borrar nada — en el peor caso repite lo que ya habia.
+function axoHuellaActividad(a){
+  if(!a) return '';
+  return [a.fecha||'', a.usuario||'', a.accion||'', a.detalle||''].join('|');
+}
+function axoFusionarActividad(listaA, listaB){
+  const out = [];
+  const vistos = Object.create(null);
+  const todo = [].concat(Array.isArray(listaA)?listaA:[], Array.isArray(listaB)?listaB:[]);
+  todo.forEach(function(a){
+    if(!a || typeof a !== 'object') return;
+    const h = axoHuellaActividad(a);
+    if(vistos[h]) return;
+    vistos[h] = 1;
+    out.push(a);
+  });
+  out.sort(function(x,y){
+    return String((y&&y.fecha)||'').localeCompare(String((x&&x.fecha)||''));
+  });
+  return out.slice(0, 300);
+}
+// Sube la UNION de la historia local y la de la nube. Nunca reemplaza.
+async function axoSubirActividad(){
+  try{
+    let local = [];
+    try{ local = JSON.parse(localStorage.getItem('axo_actividad')||'[]'); }catch(e){ local = []; }
+    let remoto = [];
+    try{
+      const { data, error } = await supa.from('axo_datos').select('valor').eq('clave','axo_actividad');
+      if(!error && data && data.length && Array.isArray(data[0].valor)) remoto = data[0].valor;
+    }catch(e){ /* si no se pudo leer, se sube al menos lo local */ }
+    const fus = axoFusionarActividad(local, remoto);
+    const { error } = await supa.from('axo_datos').upsert({ clave:'axo_actividad', valor: fus, actualizado: new Date().toISOString() });
+    if(error){ console.warn('subirNube actividad', error); return false; }
+    // El equipo queda con la misma historia que quedo en la nube. Se escribe
+    // en directo para no volver a disparar el interceptor de subida.
+    try{
+      const txt = JSON.stringify(fus);
+      if(localStorage.getItem('axo_actividad') !== txt){
+        (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_actividad', txt);
+      }
+    }catch(e){}
+    return true;
+  }catch(e){ console.warn('subirNube actividad', e); return false; }
+}
+
+// ── BANCO: FUSION A 3 VIAS, ITEM POR ITEM  (06/08/2026) ────────────────
+// El Banco viajaba como bloque entero: los 81 materiales, las 88 manos de
+// obra, las 167 recetas y los mapas, todo en un solo paquete. Gana el ultimo
+// que guarda. Caso real: Monica sube el precio del cemento a las 9:00 y
+// Daissy, que abrio el sistema a las 8:00, guarda el ladrillo a las 9:30 con
+// su base vieja — el cemento desaparece sin aviso.
+//
+// El Banco NO es una lista de rubros: son 8 estructuras distintas en
+// paralelo, asi que el motor de registros (que asume un objeto por id) no
+// aplica. Lo que si aplica es fusionar item por item comparando contra la
+// BASE: la version con la que este equipo quedo sincronizado la ultima vez.
+//   - cambio solo aca      -> gana lo local
+//   - cambio solo alla     -> gana lo de la nube
+//   - cambiaron los dos    -> gana lo local y se avisa cual
+//   - no cambio nadie      -> queda igual
+// Comparar contra la base es lo que permite distinguir "yo lo edite" de "yo
+// tengo una copia vieja", que es justo lo que el bloque entero no sabia.
+//
+// La base se guarda aparte, en axo_banco_base, y solo la escribe el motor de
+// sincronizacion. No se puede usar _bancoUltimoAplicado: esa variable tambien
+// se actualiza al guardar, asi que despues de un guardado local la base
+// quedaria igual al local y el equipo creeria que no edito nada.
+const AXO_BANCO_LISTAS = { materiales:'id', manoDeObra:'id', subcontratosCat:'id', banco:1 };
+const AXO_BANCO_MAPAS  = ['rendimientos','subCat','etapaAuto'];
+
+function _axoClaveDeItem(item, claveDe){
+  if(item === null || item === undefined) return null;
+  if(claveDe === 1) return Array.isArray(item) ? String(item[1]) : null; // filas del banco: [cat, COD, ...]
+  return (typeof item === 'object') ? String(item[claveDe]) : null;
+}
+function _axoIndexar(lista, claveDe){
+  const mapa = Object.create(null), orden = [];
+  (Array.isArray(lista)?lista:[]).forEach(function(it){
+    const k = _axoClaveDeItem(it, claveDe);
+    if(k === null || k === 'undefined') return;
+    if(!(k in mapa)) orden.push(k);
+    mapa[k] = it;
+  });
+  return { mapa:mapa, orden:orden };
+}
+// Fusion a 3 vias sobre un mapa plano. Devuelve el mapa resultante y la lista
+// de claves en las que las dos partes tocaron cosas distintas.
+function _axoFusionarMapa(base, local, remoto){
+  base = base || {}; local = local || {}; remoto = remoto || {};
+  const out = Object.create(null), conflictos = [];
+  const claves = Object.create(null);
+  [base, local, remoto].forEach(function(m){ Object.keys(m).forEach(function(k){ claves[k] = 1; }); });
+  Object.keys(claves).forEach(function(k){
+    const b = base[k], l = local[k], r = remoto[k];
+    const sb = JSON.stringify(b === undefined ? null : b);
+    const sl = JSON.stringify(l === undefined ? null : l);
+    const sr = JSON.stringify(r === undefined ? null : r);
+    const cambioLocal  = sl !== sb;
+    const cambioRemoto = sr !== sb;
+    let elegido;
+    if(cambioLocal && cambioRemoto){
+      elegido = l;
+      if(sl !== sr) conflictos.push(k);   // los dos lo tocaron distinto
+    } else if(cambioLocal){  elegido = l; }
+      else if(cambioRemoto){ elegido = r; }
+      else { elegido = (l !== undefined) ? l : ((r !== undefined) ? r : b); }
+    if(elegido !== undefined && elegido !== null) out[k] = elegido;
+  });
+  return { mapa:out, conflictos:conflictos };
+}
+// Rearma una lista respetando el orden local y agregando atras lo que llego
+// de la nube y aca no estaba.
+function _axoRearmarLista(res, ordenLocal, ordenRemoto){
+  const salida = [], puestos = Object.create(null);
+  (ordenLocal||[]).concat(ordenRemoto||[]).forEach(function(k){
+    if(puestos[k]) return;
+    if(k in res){ salida.push(res[k]); puestos[k] = 1; }
+  });
+  Object.keys(res).forEach(function(k){ if(!puestos[k]) salida.push(res[k]); });
+  return salida;
+}
+// base/local/remoto son objetos serializados del Banco (los de serializarBanco).
+// Si no hay base, se usa {} — con base vacia la fusion no borra nada: se queda
+// con todo lo de los dos lados y ante diferencia gana lo local.
+function axoFusionarBanco(base, local, remoto){
+  base = base || {}; local = local || {}; remoto = remoto || {};
+  const salida = { v: local.v || remoto.v || 1 };
+  const conflictos = [];
+
+  Object.keys(AXO_BANCO_LISTAS).forEach(function(campo){
+    const claveDe = AXO_BANCO_LISTAS[campo];
+    const iB = _axoIndexar(base[campo], claveDe);
+    const iL = _axoIndexar(local[campo], claveDe);
+    const iR = _axoIndexar(remoto[campo], claveDe);
+    const res = _axoFusionarMapa(iB.mapa, iL.mapa, iR.mapa);
+    salida[campo] = _axoRearmarLista(res.mapa, iL.orden, iR.orden);
+    res.conflictos.forEach(function(k){ conflictos.push(campo + ':' + k); });
+  });
+
+  AXO_BANCO_MAPAS.forEach(function(campo){
+    const res = _axoFusionarMapa(base[campo], local[campo], remoto[campo]);
+    salida[campo] = res.mapa;
+    res.conflictos.forEach(function(k){ conflictos.push(campo + ':' + k); });
+  });
+
+  // isSub es un conjunto de codigos: se fusiona como mapa codigo -> true
+  const aMapa = function(arr){
+    const m = Object.create(null);
+    (Array.isArray(arr)?arr:[]).forEach(function(c){ m[String(c)] = true; });
+    return m;
+  };
+  const resSub = _axoFusionarMapa(aMapa(base.isSub), aMapa(local.isSub), aMapa(remoto.isSub));
+  salida.isSub = Object.keys(resSub.mapa);
+  resSub.conflictos.forEach(function(k){ conflictos.push('isSub:' + k); });
+
+  return { banco:salida, conflictos:conflictos };
+}
+
+function axoLeerBancoBase(){
+  try{ const t = localStorage.getItem('axo_banco_base'); return t ? JSON.parse(t) : null; }
+  catch(e){ return null; }
+}
+function axoGuardarBancoBase(obj){
+  // Escritura directa: la base es interna del motor de sync, no se sube.
+  try{ (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_banco_base', JSON.stringify(obj)); }
+  catch(e){ console.warn('[Banco] no se pudo guardar la base de fusion', e && e.name); }
+}
+// Sube el Banco fusionado con el de la nube. Nunca reemplaza a ciegas.
+async function axoSubirBanco(){
+  try{
+    let local = null;
+    try{ local = JSON.parse(localStorage.getItem('axo_banco')||'null'); }catch(e){ local = null; }
+    if(!local) return false;
+
+    let remoto = null;
+    try{
+      const { data, error } = await supa.from('axo_datos').select('valor').eq('clave','axo_banco');
+      if(!error && data && data.length && data[0].valor && typeof data[0].valor === 'object') remoto = data[0].valor;
+    }catch(e){ /* sin nube legible, se sube lo local */ }
+
+    const fus = remoto ? axoFusionarBanco(axoLeerBancoBase(), local, remoto) : { banco:local, conflictos:[] };
+
+    const { error } = await supa.from('axo_datos').upsert({ clave:'axo_banco', valor: fus.banco, actualizado: new Date().toISOString() });
+    if(error){ console.warn('subirNube banco', error); return false; }
+
+    axoGuardarBancoBase(fus.banco);
+    try{
+      const txt = JSON.stringify(fus.banco);
+      if(localStorage.getItem('axo_banco') !== txt){
+        (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_banco', txt);
+        if(typeof aplicarBancoGuardado === 'function') aplicarBancoGuardado(true);
+      }
+    }catch(e){}
+
+    if(fus.conflictos.length){
+      console.warn('[Banco] tocados por las dos partes, quedo tu version:', fus.conflictos);
+      if(typeof mostrarToastGuardado === 'function')
+        mostrarToastGuardado('Banco sincronizado. ' + fus.conflictos.length + ' item(s) los editaron las dos — quedo tu version. Ver consola.');
+    }
+    return true;
+  }catch(e){ console.warn('subirNube banco', e); return false; }
+}
+
 const AXO_MODULOS_REGISTRO = ['axo_proyectos','axo_crm','axo_clientes','axo_proveedores','axo_relevamientos','axo_especificaciones','axo_gabinete','axo_plantillas'];
 function axoEsModuloRegistro(clave){ return AXO_MODULOS_REGISTRO.indexOf(clave) !== -1; }
 
@@ -3533,10 +3790,15 @@ async function axoSubirProyectos(){
     Object.keys(frags).forEach(id=>{ actuales[id] = axoHuella(frags[id]); datos[id] = frags[id]; });
   });
 
-  // Primera vez en este dispositivo: solo tomamos la huella, no subimos nada.
+  // Primera vez en este dispositivo. No se sube todo (eso pisaria a los demas),
+  // pero SI se suben los fragmentos que la nube no tiene: son altas, no pisan nada.
+  // Antes aca no se subia absolutamente nada y una obra que existiera solo en
+  // este equipo no llegaba nunca a la nube.
   if(previas === null){
+    try{ await axoSubirAltasIniciales('axo_proyectos', datos); }
+    catch(e){ console.warn('[fragmentos] fallo el alta inicial', e); }
     axoGuardarHuellas('axo_proyectos', actuales);
-    console.info('[fragmentos] primera huella - ' + Object.keys(actuales).length + ' fragmento(s), no se subio nada a proposito');
+    console.info('[fragmentos] primera huella - ' + Object.keys(actuales).length + ' fragmento(s) registrados');
     return true;
   }
 
@@ -3598,6 +3860,60 @@ async function axoSubirProyectos(){
 }
 
 
+// ═══════════════════════════════════════════════════════════════════════
+// EL HUECO DE LA PRIMERA HUELLA  (06/08/2026)
+//
+// Cuando un dispositivo corre por primera vez (o se le limpio el navegador,
+// o se actualizo el sistema y todavia no existe axo_h_*), el codigo tomaba la
+// huella de TODO lo que tenia guardado y no subia nada, para que un equipo con
+// una copia vieja no impusiera su version sobre la de los demas.
+//
+// El efecto secundario: todo lo que estaba en ese equipo en ese momento quedaba
+// marcado como "ya subido" sin haber subido nunca. Si una obra existia solo
+// ahi, no llegaba a la nube JAMAS — salvo que alguien volviera a tocarla.
+//
+// La solucion no es subir todo (eso reabre el desastre del 05/08), sino subir
+// SOLO lo que no existe en la nube. Un registro que la nube no tiene no le
+// puede pisar nada a nadie: es un alta, no una sobreescritura.
+// Si la consulta falla, se devuelve null y no se sube nada — ante la duda, no.
+// ═══════════════════════════════════════════════════════════════════════
+async function axoIdsFaltantesEnNube(modulo, ids){
+  if(!supa || !ids.length) return [];
+  const existen = {};
+  for(let i=0; i<ids.length; i+=200){
+    const lote = ids.slice(i, i+200);
+    const { data, error } = await supa.from('axo_registros')
+      .select('reg_id').eq('modulo', modulo).in('reg_id', lote);
+    if(error){ console.warn('[registros] no se pudo consultar que falta en la nube', error); return null; }
+    (data||[]).forEach(r=>{ existen[r.reg_id] = 1; });
+  }
+  // Ojo: las filas dadas de baja (borrado=true) tambien cuentan como existentes.
+  // Si no, cada primera huella resucitaria todo lo que alguien dio de baja.
+  return ids.filter(function(id){ return !existen[id]; });
+}
+
+// Sube como alta los registros que la nube todavia no tiene. Devuelve cuantos subio.
+async function axoSubirAltasIniciales(modulo, datosPorId){
+  const ids = Object.keys(datosPorId);
+  const faltan = await axoIdsFaltantesEnNube(modulo, ids);
+  if(faltan === null || !faltan.length){
+    console.info('[registros] primera huella de ' + modulo + ': nada nuevo que subir');
+    return 0;
+  }
+  const ahora = new Date().toISOString();
+  const quien = window.__axoUsuarioActual || '';
+  const filas = faltan
+    .filter(function(id){ return !axoVacioObj(datosPorId[id]); })
+    .map(function(id){
+      return { modulo:modulo, reg_id:id, datos:datosPorId[id], borrado:false, actualizado:ahora, quien:quien };
+    });
+  if(!filas.length) return 0;
+  const { error } = await supa.from('axo_registros').upsert(filas, { onConflict:'modulo,reg_id' });
+  if(error){ console.warn('[registros] no se pudieron subir las altas iniciales de', modulo, error); return 0; }
+  console.info('[registros] primera huella de ' + modulo + ': se subieron ' + filas.length + ' registro(s) que la nube no tenia');
+  return filas.length;
+}
+
 // Huella corta y estable de un registro, para saber si cambio sin guardar una copia entera
 function axoHuella(obj){
   const t = JSON.stringify(obj === undefined ? null : obj);
@@ -3635,8 +3951,11 @@ async function axoSubirRegistros(clave){
   if(previas === null){
     const iniciales = {};
     Object.keys(obj).forEach(id=>{ iniciales[id] = axoHuella(obj[id]); });
+    // Igual que en las obras: lo que la nube no tiene se sube como alta.
+    try{ await axoSubirAltasIniciales(clave, obj); }
+    catch(e){ console.warn('[registros] fallo el alta inicial de', clave, e); }
     axoGuardarHuellas(clave, iniciales);
-    console.info('[registros] primera huella de', clave, '-', Object.keys(iniciales).length, 'registros (no se subio nada, a proposito)');
+    console.info('[registros] primera huella de', clave, '-', Object.keys(iniciales).length, 'registros');
     return true;
   }
 
@@ -3687,31 +4006,54 @@ async function axoBajarRegistros(){
     if(!axoEsModuloRegistro(mod)) return;
     const obj = axoLeerModulo(mod);
     const huellas = axoLeerHuellas(mod) || {};
+    // 06/08/2026 — las marcas de "visto" y el conteo de cambios de ESTE modulo
+    // se juntan aparte y recien se dan por buenos si la escritura en el
+    // dispositivo funciono. Antes se anotaban siempre, incluso cuando el
+    // modulo no habia entrado por falta de espacio: la guardia quedaba creyendo
+    // que este equipo ya habia visto filas que en realidad nunca se aplicaron.
+    const vistosMod = {};
+    let cambiosMod = 0;
     // Las obras bajan partidas: la base primero, despues sus pedazos
     const filasMod = (mod === 'axo_proyectos') ? axoOrdenarFragmentos(porModulo[mod]) : porModulo[mod];
     filasMod.forEach(r=>{
       // Toda fila que baja queda marcada como "vista". Es lo que despues le
       // permite a la guardia distinguir lo que este equipo ya conoce de lo
       // que modifico otra persona mientras tanto.
-      vistosNuevos[mod + '|' + r.reg_id] = r.actualizado;
+      vistosMod[mod + '|' + r.reg_id] = r.actualizado;
       if(mod === 'axo_proyectos' && (String(r.reg_id).indexOf(AXO_SEP) !== -1 || (r.datos && r.datos.__axoPartido))){
-        if(axoAplicarFragmento(obj, r, huellas)) cambios++;
+        if(axoAplicarFragmento(obj, r, huellas)) cambiosMod++;
         return;
       }
       if(r.borrado){
-        if(Object.prototype.hasOwnProperty.call(obj, r.reg_id)){ delete obj[r.reg_id]; delete huellas[r.reg_id]; cambios++; }
+        if(Object.prototype.hasOwnProperty.call(obj, r.reg_id)){ delete obj[r.reg_id]; delete huellas[r.reg_id]; cambiosMod++; }
       } else {
         const h = axoHuella(r.datos);
-        if(huellas[r.reg_id] !== h){ obj[r.reg_id] = r.datos; huellas[r.reg_id] = h; cambios++; }
+        if(huellas[r.reg_id] !== h){ obj[r.reg_id] = r.datos; huellas[r.reg_id] = h; cambiosMod++; }
       }
     });
     try{ set(mod, JSON.stringify(obj)); }
     catch(e){ sinEspacio.push(mod); console.warn('[registros] no entro en este dispositivo:', mod, e && e.name); return; }
     axoGuardarHuellas(mod, huellas);
+    Object.assign(vistosNuevos, vistosMod);
+    cambios += cambiosMod;
   });
 
   axoGuardarVistos(vistosNuevos);
-  try{ set('axo_ultima_sync_reg', data[data.length-1].actualizado); }catch(e){}
+
+  // ── 06/08/2026 — LA MARCA DE AGUA SOLO AVANZA SI ENTRO TODO ──
+  // Este era el agujero mas grave del sistema. La bajada pide a la nube
+  // "todo lo que cambio despues de axo_ultima_sync_reg". Antes esa marca se
+  // adelantaba SIEMPRE, aunque un modulo no hubiera entrado por falta de
+  // espacio. Esas filas quedaban por debajo de la marca y la consulta
+  // .gt('actualizado', desde) no las volvia a pedir NUNCA MAS: el dispositivo
+  // perdia esos datos en silencio y de forma permanente, sin ningun aviso.
+  // Ahora, si algo no entro, la marca se queda donde estaba y el proximo
+  // Refrescar vuelve a pedir esas mismas filas.
+  if(sinEspacio.length){
+    console.warn('[registros] la marca de sincronizacion NO avanza: no entro', sinEspacio.join(', ') + '. Se vuelve a intentar en la proxima bajada.');
+  } else {
+    try{ set('axo_ultima_sync_reg', data[data.length-1].actualizado); }catch(e){}
+  }
   return { cambios:cambios, error:null, sinEspacio:sinEspacio };
 }
 
@@ -3720,6 +4062,10 @@ async function subirNube(clave){
   if(!supa) return false;
   // Los modulos migrados ya no viajan como bloque: van registro por registro.
   if(axoEsModuloRegistro(clave)) return await axoSubirRegistros(clave);
+  // La bitacora sube como union con lo que ya hay en la nube, nunca la pisa.
+  if(clave === 'axo_actividad') return await axoSubirActividad();
+  // El Banco sube fusionado item por item contra la nube, nunca la pisa.
+  if(clave === 'axo_banco') return await axoSubirBanco();
   try{
     const valor = localStorage.getItem(clave);
     if(valor === null) return false;
@@ -3729,12 +4075,14 @@ async function subirNube(clave){
   }catch(e){ console.warn('subirNube', clave, e); return false; }
 }
 
-// Sube TODAS las claves de libro de obra (son dinámicas: axo_libro_*)
+// Sube TODAS las claves dinámicas: Libro de Obra (axo_libro_*) e Informe
+// Cliente (axo_informe_*). El Informe se sumó el 06/08/2026 — antes este
+// barrido solo miraba los libros y el borrador del informe nunca subía.
 async function subirLibrosNube(){
   if(!supa) return;
   for(let i=0;i<localStorage.length;i++){
     const k = localStorage.key(i);
-    if(k && k.startsWith('axo_libro_')){
+    if(axoEsClaveDinamica(k)){
       try{ await supa.from('axo_datos').upsert({ clave:k, valor: JSON.parse(localStorage.getItem(k)), actualizado:new Date().toISOString() }); }catch(e){}
     }
   }
@@ -3786,6 +4134,18 @@ async function flushPendientesAntesDeBajar(){
   for(const k of pend){
     const local = localStorage.getItem(k);
     if(local === null) continue;
+
+    // Bitacora y Banco se exceptuan de las dos guardas de abajo. Esas guardas
+    // existen para que una copia vieja no pise a una nueva — pero estas dos
+    // subidas ya no pisan nada: fusionan contra la nube antes de escribir.
+    // Descartarlas aca solo lograria demorar cambios que no hacen dano.
+    if(k === 'axo_actividad' || k === 'axo_banco'){
+      if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(k);
+      const okFus = await subirNube(k);
+      if(okFus){ if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k); }
+      else { siguenPendientes.push(k); }
+      continue;
+    }
 
     const enNube = nube[k];
     if(enNube){
@@ -3909,6 +4269,36 @@ function repintarTabActivo(){
   return { tab: name, fallaron: fallaron };
 }
 
+// FUSION DEL HISTORIAL DE RESPALDOS  (06/08/2026)
+// axo_proyectos_backup (las 5 versiones anteriores de cada proyecto, las que usa
+// el boton Deshacer) vivia SOLO en el dispositivo donde se genero: si esa PC se
+// rompia, el historial se iba con ella. Ahora sincroniza — pero no se puede pisar
+// de un lado al otro, porque cada equipo tiene su propio historial y el ultimo en
+// escribir borraria el del otro. Por eso se UNEN: se juntan las dos listas por
+// proyecto, se descartan las versiones identicas y se conservan las 5 primeras.
+function axoFusionarBackups(local, nube){
+  const TOPE = (typeof BACKUPS_POR_PROYECTO !== 'undefined') ? BACKUPS_POR_PROYECTO : 5;
+  const comoLista = function(v){ if(!v) return []; return Array.isArray(v) ? v : [v]; };
+  const out = {};
+  const nombres = {};
+  Object.keys(local||{}).forEach(function(n){ nombres[n]=1; });
+  Object.keys(nube ||{}).forEach(function(n){ nombres[n]=1; });
+  Object.keys(nombres).forEach(function(n){
+    // Lo local va primero: el historial de ESTE equipo nunca se pierde.
+    const lista = comoLista(local && local[n]).concat(comoLista(nube && nube[n]));
+    const vistos = {}, res = [];
+    for(let i=0; i<lista.length && res.length<TOPE; i++){
+      let firma;
+      try{ firma = JSON.stringify(lista[i]); }catch(e){ continue; }
+      if(!firma || vistos[firma]) continue;
+      vistos[firma] = 1;
+      res.push(lista[i]);
+    }
+    if(res.length) out[n] = res;
+  });
+  return out;
+}
+
 // Baja todo desde la nube, lo escribe en localStorage y REPINTA lo que estas mirando
 async function sincronizarDesdeNube(opts){
   if(!supa) return false;
@@ -3935,6 +4325,63 @@ async function sincronizarDesdeNube(opts){
     data.forEach(row=>{
       if (axoEsModuloRegistro(row.clave)) return; // ya se fusiono arriba, no lo pisamos con el bloque viejo
       if (window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(row.clave)) return; // hay un cambio local subiendo todavia
+      // El historial de Deshacer tampoco se pisa: se une con el local.
+      if (row.clave === 'axo_proyectos_backup'){
+        try{
+          let local = {};
+          try{ local = JSON.parse(localStorage.getItem('axo_proyectos_backup')||'{}'); }catch(e2){ local = {}; }
+          const txt = JSON.stringify(axoFusionarBackups(local, row.valor));
+          if(localStorage.getItem('axo_proyectos_backup') !== txt){
+            (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_proyectos_backup', txt);
+            cambiadas++;
+            if(typeof actualizarBotonDeshacer==='function') actualizarBotonDeshacer();
+          }
+        }catch(e2){
+          sinEspacio.push('axo_proyectos_backup');
+          console.warn('[sync] no entro el historial de Deshacer en este dispositivo:', e2 && e2.name);
+        }
+        return;
+      }
+      // La bitacora se UNE con la local, no la reemplaza: si se pisara, este
+      // equipo perderia las lineas que la otra persona todavia no vio.
+      if (row.clave === 'axo_actividad'){
+        try{
+          let local = [];
+          try{ local = JSON.parse(localStorage.getItem('axo_actividad')||'[]'); }catch(e2){ local = []; }
+          const txt = JSON.stringify(axoFusionarActividad(local, row.valor));
+          if(localStorage.getItem('axo_actividad') !== txt){
+            (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_actividad', txt);
+            cambiadas++;
+          }
+        }catch(e2){
+          sinEspacio.push('axo_actividad');
+          console.warn('[sync] no entro la bitacora en este dispositivo:', e2 && e2.name);
+        }
+        return;
+      }
+      // El Banco tampoco se pisa: se fusiona item por item contra la base.
+      // Si hay ediciones sin guardar, aplicarBancoGuardado() las respeta y
+      // avisa; lo fusionado ya queda en axo_banco esperando.
+      if (row.clave === 'axo_banco'){
+        try{
+          let local = null;
+          try{ local = JSON.parse(localStorage.getItem('axo_banco')||'null'); }catch(e2){ local = null; }
+          const fus = local ? axoFusionarBanco(axoLeerBancoBase(), local, row.valor)
+                            : { banco: row.valor, conflictos: [] };
+          const txt = JSON.stringify(fus.banco);
+          axoGuardarBancoBase(fus.banco);
+          if(localStorage.getItem('axo_banco') !== txt){
+            (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))('axo_banco', txt);
+            if(typeof aplicarBancoGuardado === 'function') aplicarBancoGuardado(false);
+            cambiadas++;
+          }
+          if(fus.conflictos.length) console.warn('[Banco] tocados por las dos partes, quedo tu version:', fus.conflictos);
+        }catch(e2){
+          sinEspacio.push('axo_banco');
+          console.warn('[sync] no entro el Banco en este dispositivo:', e2 && e2.name);
+        }
+        return;
+      }
       const nuevo = JSON.stringify(row.valor);
       if(localStorage.getItem(row.clave) === nuevo) return; // ya estaba igual
       try{ localStorage.setItem(row.clave, nuevo); cambiadas++; }
@@ -4108,6 +4555,13 @@ async function subirTodoNube(){
 // la bajada fallaba o no se repintaba ninguna pantalla.
 async function bajarTodoNube(){
   if(!supa){ alert('No hay conexion con la nube.'); return; }
+  // 06/08/2026 — ANTES de bajar, subir lo que quedo pendiente.
+  // Sin esto, apretar Refrescar con cambios locales sin confirmar hacia que la
+  // nube los pisara con la version vieja. Es la misma proteccion que ya corria
+  // al iniciar sesion y al cargar la pagina, pero faltaba en el boton manual.
+  try{
+    if(typeof flushPendientesAntesDeBajar==='function') await flushPendientesAntesDeBajar();
+  }catch(e){ console.warn('[refrescar] no se pudo subir lo pendiente antes de bajar', e); }
   await sincronizarDesdeNube({ manual:true });
 }
 
@@ -11964,9 +12418,9 @@ function exportarRelevPDF(){
   let itemsHtml='';
   (r.items||[]).forEach(it=>{ const b=getBancoRow(it.cod); itemsHtml+=`<tr><td>${it.cod}</td><td>${b?b[2]:'—'}</td><td style="text-align:right">${it.cant||0}</td><td style="text-align:center">${b?b[3]:'—'}</td></tr>`; });
   let fotosHtml='';
-  (notas.fotos||[]).forEach(f=>{ fotosHtml+=`<div class="ph"><img src="${f.img}"><div class="cap">${((f.nota||'').replace(/</g,'&lt;'))||'&nbsp;'}</div></div>`; });
+  (notas.fotos||[]).forEach(f=>{ fotosHtml+=`<div class="ph"><img src="${srcMedia(f.img)}"><div class="cap">${((f.nota||'').replace(/</g,'&lt;'))||'&nbsp;'}</div></div>`; });
   let croqHtml='';
-  (notas.croquis||[]).forEach(c=>{ croqHtml+=`<div class="ph"><img src="${c.img}"><div class="cap">${(c.nombre||'Croquis').replace(/</g,'&lt;')}</div></div>`; });
+  (notas.croquis||[]).forEach(c=>{ croqHtml+=`<div class="ph"><img src="${srcMedia(c.img)}"><div class="cap">${(c.nombre||'Croquis').replace(/</g,'&lt;')}</div></div>`; });
   const win=window.open('','_blank');
   win.document.write(`<!DOCTYPE html><html lang="es"><head><meta charset="utf-8"><title>Informe Relevamiento</title>
   <style>
@@ -12119,7 +12573,62 @@ function toggleGrabacionVoz() {
   if (btn) { btn.textContent = '⏹ Detener y guardar'; btn.classList.add('btn-danger'); }
 }
 function setRelevFotoNota(i,v){ const n=loadRelevNotas(); if(n.fotos[i]){ n.fotos[i].nota=v; saveRelevNotasObj(n); } }
-function delRelevFoto(i){ if(!confirm('¿Eliminar esta foto? No se puede recuperar.')) return; const n=loadRelevNotas(); n.fotos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
+function delRelevFoto(i){
+  if(!confirm('¿Eliminar esta foto? No se puede recuperar.')) return;
+  const n=loadRelevNotas();
+  const item = n.fotos[i] && n.fotos[i].img;
+  n.fotos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas();
+  if(typeof borrarMediaStorage==='function') borrarMediaStorage(item);   // tambien sale del bucket
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// RELEVAMIENTO: LAS FOTOS DEJAN DE VIVIR EN localStorage  (06/08/2026)
+//
+// Hasta hoy cada foto de Relevamiento se guardaba como base64 adentro de
+// localStorage. Una foto comprimida pesa ~150 KB, y en base64 ocupa un tercio
+// mas. Con el limite del navegador (~5 MB por sitio) unas 25 fotos llenaban
+// TODO el espacio — y ahi empezaba el efecto domino: los guardados fallaban,
+// las bajadas de la nube no entraban ('sinEspacio') y los modulos quedaban
+// incompletos sin que nadie se enterara. Ademas axo_relevamientos sincroniza,
+// asi que esas mismas fotos viajaban a la nube dentro del JSON del modulo.
+//
+// El Libro de Obra ya subia sus fotos a Supabase Storage y guardaba solo el
+// link. Relevamiento hace ahora lo mismo, contra el mismo bucket.
+//
+// Compatibilidad: una foto vieja sigue siendo un string base64 y se muestra
+// igual. srcMedia() acepta las dos formas. No hace falta migrar nada a mano.
+// ═══════════════════════════════════════════════════════════════════════
+function relevSlugMedia(){
+  const base = 'relev/' + (relevActivo || 'sin-id');
+  return base.replace(/[^a-zA-Z0-9/_-]/g,'_');
+}
+async function subirMediaRelev(blob, ext, tipo){
+  if (typeof supa === 'undefined' || !supa || !supa.storage) throw new Error('Supabase no disponible');
+  const path = relevSlugMedia() + '/' + Date.now() + '_' + Math.random().toString(36).slice(2,7) + '.' + (ext||'jpg');
+  const { error } = await supa.storage.from(LIBRO_BUCKET).upload(path, blob, {
+    contentType: blob.type || 'image/jpeg', upsert: false
+  });
+  if (error) throw error;
+  const { data } = supa.storage.from(LIBRO_BUCKET).getPublicUrl(path);
+  return { u: data.publicUrl, p: path, s: blob.size, t: tipo || 'img', f: new Date().toISOString() };
+}
+
+// Dibuja una imagen de fondo en el lienzo.
+// crossOrigin='anonymous' es imprescindible: sin eso, una imagen que viene del
+// bucket CONTAMINA el canvas y despues cv.toDataURL() lanza SecurityError, o
+// sea que el dibujo no se puede guardar. Con dataURL viejas no molesta.
+function axoFondoEnLienzo(cv, ctx, src){
+  if(!src) return;
+  const img = new Image();
+  if(/^https?:/i.test(src)) img.crossOrigin = 'anonymous';
+  img.onload = function(){
+    const r = Math.min(cv.width/img.width, cv.height/img.height);
+    const w = img.width*r, h = img.height*r;
+    ctx.drawImage(img, (cv.width-w)/2, (cv.height-h)/2, w, h);
+  };
+  img.onerror = function(){ console.warn('[relev] no se pudo cargar la imagen de fondo del lienzo'); };
+  img.src = src;
+}
 
 function comprimirImagen(file, cb){
   const reader=new FileReader();
@@ -12141,10 +12650,23 @@ function comprimirImagen(file, cb){
 function subirRelevFotos(input){
   const files=Array.from(input.files||[]);
   let pend=files.length;
+  if(!pend) return;
+  let subidas=0, locales=0;
   files.forEach(f=>{
-    comprimirImagen(f, dataURL=>{
-      const n=loadRelevNotas(); n.fotos.push({img:dataURL, nota:''}); saveRelevNotasObj(n);
-      if(--pend===0){ renderRelevNotas(); }
+    comprimirImagen(f, async dataURL=>{
+      // Se intenta el bucket. Si no responde, se guarda base64 como antes:
+      // prefiero que ocupe lugar a que la foto se pierda.
+      let item = dataURL;
+      try{ item = await subirMediaRelev(dataURLaBlob(dataURL), 'jpg', 'img'); subidas++; }
+      catch(err){ locales++; console.warn('[relev] Storage fallo, guardo local:', err && err.message); }
+      const n=loadRelevNotas(); n.fotos.push({img:item, nota:''}); saveRelevNotasObj(n);
+      if(--pend===0){
+        renderRelevNotas();
+        if(typeof mostrarToastGuardado==='function'){
+          if(locales) mostrarToastGuardado('⚠️ ' + locales + ' foto(s) guardadas en el equipo — no se pudo subir a la nube');
+          else if(subidas) mostrarToastGuardado('☁️ ' + subidas + ' foto(s) subidas');
+        }
+      }
     });
   });
   input.value='';
@@ -12155,17 +12677,39 @@ function subirRelevArchivos(input){
   let pend=files.length;
   if(!pend) return;
   files.forEach(f=>{
-    if(f.size > 4*1024*1024){ alert('El archivo "'+f.name+'" supera 4MB y no se puede guardar en este dispositivo. Reducí su tamaño.'); if(--pend===0) renderRelevNotas(); return; }
-    const reader=new FileReader();
-    reader.onload=e=>{
-      const n=loadRelevNotas(); n.archivos=n.archivos||[]; n.archivos.push({nombre:f.name, tipo:f.type||'', data:e.target.result}); saveRelevNotasObj(n);
+    // Primero el bucket. Un PDF o un DWG en base64 dentro de localStorage se
+    // come el espacio del navegador entero (era el limite de 4 MB de antes).
+    const ext = (f.name.split('.').pop()||'bin').toLowerCase();
+    subirMediaRelev(f, ext, 'arch').then(item=>{
+      const n=loadRelevNotas(); n.archivos=n.archivos||[];
+      n.archivos.push({nombre:f.name, tipo:f.type||'', data:item});
+      saveRelevNotasObj(n);
       if(--pend===0) renderRelevNotas();
-    };
-    reader.readAsDataURL(f);
+    }).catch(err=>{
+      console.warn('[relev] Storage fallo para', f.name, err && err.message);
+      // Respaldo local, con el mismo tope de antes para no reventar el navegador
+      if(f.size > 4*1024*1024){
+        alert('El archivo "'+f.name+'" supera 4MB y no se pudo subir a la nube.\n\nRevisá la conexión e intentá de nuevo, o reducí su tamaño.');
+        if(--pend===0) renderRelevNotas();
+        return;
+      }
+      const reader=new FileReader();
+      reader.onload=e=>{
+        const n=loadRelevNotas(); n.archivos=n.archivos||[]; n.archivos.push({nombre:f.name, tipo:f.type||'', data:e.target.result}); saveRelevNotasObj(n);
+        if(--pend===0) renderRelevNotas();
+      };
+      reader.readAsDataURL(f);
+    });
   });
   input.value='';
 }
-function delRelevArchivo(i){ if(!confirm('¿Eliminar este archivo? No se puede recuperar.')) return; const n=loadRelevNotas(); n.archivos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
+function delRelevArchivo(i){
+  if(!confirm('¿Eliminar este archivo? No se puede recuperar.')) return;
+  const n=loadRelevNotas();
+  const item = n.archivos[i] && n.archivos[i].data;
+  n.archivos.splice(i,1); saveRelevNotasObj(n); renderRelevNotas();
+  if(typeof borrarMediaStorage==='function') borrarMediaStorage(item);
+}
 function iconoArchivo(nombre){
   const ext=(nombre.split('.').pop()||'').toLowerCase();
   if(ext==='pdf') return '📕';
@@ -12185,7 +12729,7 @@ function renderRelevNotas(){
   notas.fotos.forEach((f,i)=>{
     fotosHtml+=`<div style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;width:180px">
       <div style="position:relative">
-        <img src="${f.img}" style="width:100%;height:130px;object-fit:cover;display:block;cursor:pointer" onclick="abrirDibujoFoto(${i})" title="Tocar para dibujar/rayar">
+        <img src="${srcMedia(f.img)}" style="width:100%;height:130px;object-fit:cover;display:block;cursor:pointer" onclick="abrirDibujoFoto(${i})" title="Tocar para dibujar/rayar">
         <button onclick="delRelevFoto(${i})" style="position:absolute;top:4px;right:4px;border:2px solid #fff;background:#E53935;color:#fff;border-radius:50%;width:26px;height:26px;font-size:14px;font-weight:700;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.45);z-index:5">✕</button>
         <button onclick="abrirDibujoFoto(${i})" style="position:absolute;bottom:4px;right:4px;border:none;background:rgba(24,95,165,0.85);color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer">✏ Rayar</button>
       </div>
@@ -12197,7 +12741,7 @@ function renderRelevNotas(){
   (notas.archivos||[]).forEach((a,i)=>{
     archivosHtml+=`<div style="display:flex;align-items:center;gap:8px;border:1px solid #e0e0e0;border-radius:6px;padding:6px 10px;font-size:13px">
       <span style="font-size:18px">${iconoArchivo(a.nombre)}</span>
-      <a href="${a.data}" download="${a.nombre}" style="flex:1;color:#185FA5;text-decoration:none">${a.nombre}</a>
+      <a href="${srcMedia(a.data)}" download="${a.nombre}" target="_blank" rel="noopener" style="flex:1;color:#185FA5;text-decoration:none">${a.nombre}</a>
       <button onclick="delRelevArchivo(${i})" style="border:none;background:#fee;color:#C00;border-radius:3px;cursor:pointer;padding:2px 7px">✕</button>
     </div>`;
   });
@@ -12206,7 +12750,7 @@ function renderRelevNotas(){
   (notas.croquis||[]).forEach((c,i)=>{
     croquisHtml+=`<div style="border:1px solid #e0e0e0;border-radius:8px;overflow:hidden;width:180px">
       <div style="position:relative">
-        <img src="${c.img}" style="width:100%;height:130px;object-fit:contain;background:#fafafa;display:block;cursor:pointer" onclick="editarCroquis(${i})" title="Tocar para editar el croquis">
+        <img src="${srcMedia(c.img)}" style="width:100%;height:130px;object-fit:contain;background:#fafafa;display:block;cursor:pointer" onclick="editarCroquis(${i})" title="Tocar para editar el croquis">
         <button onclick="delRelevCroquis(${i})" style="position:absolute;top:4px;right:4px;border:2px solid #fff;background:#E53935;color:#fff;border-radius:50%;width:26px;height:26px;font-size:14px;font-weight:700;line-height:1;cursor:pointer;box-shadow:0 1px 4px rgba(0,0,0,0.45);z-index:5">✕</button>
         <button onclick="editarCroquis(${i})" style="position:absolute;bottom:4px;right:4px;border:none;background:rgba(106,27,154,0.85);color:#fff;border-radius:4px;padding:2px 8px;font-size:11px;cursor:pointer">✏ Editar</button>
       </div>
@@ -12251,13 +12795,20 @@ function abrirDibujoLibre(){ abrirLienzo({tipo:'nuevo'}); }
 function abrirDibujoFoto(i){ abrirLienzo({tipo:'foto', idx:i}); }
 function editarCroquis(i){ abrirLienzo({tipo:'croquis', idx:i}); }
 function setRelevCroquisNombre(i,v){ const n=loadRelevNotas(); if((n.croquis||[])[i]){ n.croquis[i].nombre=v; saveRelevNotasObj(n); } }
-function delRelevCroquis(i){ if(!confirm('¿Eliminar este croquis? No se puede recuperar.')) return; const n=loadRelevNotas(); (n.croquis||[]).splice(i,1); saveRelevNotasObj(n); renderRelevNotas(); }
-function _imgTargetSrc(notas){
+function delRelevCroquis(i){
+  if(!confirm('¿Eliminar este croquis? No se puede recuperar.')) return;
+  const n=loadRelevNotas();
+  const item = (n.croquis||[])[i] && n.croquis[i].img;
+  (n.croquis||[]).splice(i,1); saveRelevNotasObj(n); renderRelevNotas();
+  if(typeof borrarMediaStorage==='function') borrarMediaStorage(item);
+}
+function _imgTargetItem(notas){
   if(!dibujoTarget) return null;
   if(dibujoTarget.tipo==='foto' && notas.fotos[dibujoTarget.idx]) return notas.fotos[dibujoTarget.idx].img;
   if(dibujoTarget.tipo==='croquis' && (notas.croquis||[])[dibujoTarget.idx]) return notas.croquis[dibujoTarget.idx].img;
   return null;
 }
+function _imgTargetSrc(notas){ return srcMedia(_imgTargetItem(notas)) || null; }
 function abrirLienzo(target){
   dibujoTarget=target;
   const notas=loadRelevNotas();
@@ -12283,12 +12834,7 @@ function abrirLienzo(target){
   const cv=document.getElementById('dibujo-canvas');
   dibujoCtx=cv.getContext('2d');
   dibujoCtx.fillStyle='#fff'; dibujoCtx.fillRect(0,0,cv.width,cv.height);
-  const _src=_imgTargetSrc(notas);
-  if(_src){
-    const img=new Image();
-    img.onload=()=>{ const r=Math.min(cv.width/img.width,cv.height/img.height); const w=img.width*r,h=img.height*r; dibujoCtx.drawImage(img,(cv.width-w)/2,(cv.height-h)/2,w,h); };
-    img.src=_src;
-  }
+  axoFondoEnLienzo(cv, dibujoCtx, _imgTargetSrc(notas));
   const pos=ev=>{ const rect=cv.getBoundingClientRect(); const t=ev.touches?ev.touches[0]:ev; return {x:(t.clientX-rect.left)*(cv.width/rect.width), y:(t.clientY-rect.top)*(cv.height/rect.height)}; };
   const start=ev=>{ dibujando=true; const p=pos(ev); dibujoCtx.beginPath(); dibujoCtx.moveTo(p.x,p.y); ev.preventDefault(); };
   const move=ev=>{ if(!dibujando)return; const p=pos(ev); dibujoCtx.strokeStyle=document.getElementById('dibujo-color').value; dibujoCtx.lineWidth=parseInt(document.getElementById('dibujo-grosor').value); dibujoCtx.lineCap='round'; dibujoCtx.lineTo(p.x,p.y); dibujoCtx.stroke(); ev.preventDefault(); };
@@ -12296,25 +12842,84 @@ function abrirLienzo(target){
   cv.onmousedown=start; cv.onmousemove=move; cv.onmouseup=end; cv.onmouseleave=end;
   cv.ontouchstart=start; cv.ontouchmove=move; cv.ontouchend=end;
 }
-function limpiarLienzo(){ const cv=document.getElementById('dibujo-canvas'); const notas=loadRelevNotas(); dibujoCtx.fillStyle='#fff'; dibujoCtx.fillRect(0,0,cv.width,cv.height); const _src=_imgTargetSrc(notas); if(_src){ const img=new Image(); img.onload=()=>{ const r=Math.min(cv.width/img.width,cv.height/img.height); const w=img.width*r,h=img.height*r; dibujoCtx.drawImage(img,(cv.width-w)/2,(cv.height-h)/2,w,h); }; img.src=_src; } }
-function cerrarLienzo(){ document.getElementById('dibujo-modal').style.display='none'; }
-function guardarLienzo(){
+function limpiarLienzo(){
   const cv=document.getElementById('dibujo-canvas');
-  const dataURL=cv.toDataURL('image/jpeg',0.6);
   const notas=loadRelevNotas();
-  if(dibujoTarget && dibujoTarget.tipo==='foto' && notas.fotos[dibujoTarget.idx]) notas.fotos[dibujoTarget.idx].img=dataURL;
-  else if(dibujoTarget && dibujoTarget.tipo==='croquis' && (notas.croquis||[])[dibujoTarget.idx]) notas.croquis[dibujoTarget.idx].img=dataURL;
-  else { notas.croquis=notas.croquis||[]; notas.croquis.push({img:dataURL, nombre:'Croquis '+(notas.croquis.length+1)}); }
+  dibujoCtx.fillStyle='#fff'; dibujoCtx.fillRect(0,0,cv.width,cv.height);
+  axoFondoEnLienzo(cv, dibujoCtx, _imgTargetSrc(notas));
+}
+function cerrarLienzo(){ document.getElementById('dibujo-modal').style.display='none'; }
+async function guardarLienzo(){
+  const cv=document.getElementById('dibujo-canvas');
+  let dataURL;
+  try{ dataURL = cv.toDataURL('image/jpeg',0.6); }
+  catch(err){
+    // Pasa si la imagen de fondo contamino el canvas (bucket sin CORS).
+    console.warn('[relev] no se pudo leer el lienzo', err);
+    alert('No se pudo guardar el dibujo.\n\nEl navegador bloqueó la lectura de la imagen de fondo. Recargá la página con Ctrl+Shift+R y probá de nuevo.');
+    return;
+  }
+  const notas=loadRelevNotas();
+  const anterior = _imgTargetItem(notas);
+  let item = dataURL;
+  try{ item = await subirMediaRelev(dataURLaBlob(dataURL), 'jpg', 'img'); }
+  catch(e){ console.warn('[relev] Storage fallo al guardar el dibujo, queda local:', e && e.message); }
+  if(dibujoTarget && dibujoTarget.tipo==='foto' && notas.fotos[dibujoTarget.idx]) notas.fotos[dibujoTarget.idx].img=item;
+  else if(dibujoTarget && dibujoTarget.tipo==='croquis' && (notas.croquis||[])[dibujoTarget.idx]) notas.croquis[dibujoTarget.idx].img=item;
+  else { notas.croquis=notas.croquis||[]; notas.croquis.push({img:item, nombre:'Croquis '+(notas.croquis.length+1)}); }
   saveRelevNotasObj(notas); cerrarLienzo(); renderRelevNotas();
+  // La version anterior ya no la usa nadie: se saca del bucket
+  if(anterior && anterior !== item && typeof borrarMediaStorage==='function') borrarMediaStorage(anterior);
 }
 
 // ════════════════════════════════════════════════════════
 // LIBRO DE OBRA — bitácora por proyecto
 // ════════════════════════════════════════════════════════
-function libroKey(){
+// ── ANCLA DE OBRA  (06/08/2026) ────────────────────────────────────────
+// El Libro y el Informe se guardaban bajo una clave armada con el nombre del
+// cliente y del proyecto: axo_libro_Perez__Casa_quinta. Al corregir un
+// apellido mal escrito o renombrar la obra, la clave cambiaba y todo el Libro
+// quedaba huerfano: seguia en el navegador, pero el sistema ya no lo
+// encontraba y mostraba la obra vacia.
+//
+// Ahora cada obra tiene un ANCLA: el slug del momento en que se creo, mas un
+// sufijo corto al azar (Perez__Casa_quinta_k3f9a). Se fija una sola vez y no
+// cambia nunca mas, se renombre lo que se renombre. Sigue siendo legible, que
+// importa porque el ancla tambien nombra la carpeta de fotos en el bucket.
+//
+// Las obras que ya existen no tienen ancla: para ellas todo sigue exactamente
+// igual que hasta hoy (se usa el slug). El ancla se les asigna al guardar el
+// proyecto, y la primera vez que se pide la clave se copia el contenido
+// viejo a la nueva. Las fotos ya subidas no se tocan: srcMedia() usa la URL
+// guardada en el dato (f.u) y el borrado usa f.p, no el slug.
+let obraAnclaActual = null;
+
+function _axoSlugObra(){
   const cli=document.getElementById('p-cliente')?.value||'';
   const proy=document.getElementById('p-proyecto')?.value||'';
-  return 'axo_libro_'+(cli+'|'+proy).replace(/[^a-zA-Z0-9]/g,'_');
+  return (cli+'|'+proy).replace(/[^a-zA-Z0-9]/g,'_');
+}
+function axoNuevaAnclaObra(){
+  return _axoSlugObra() + '_' + Math.random().toString(36).slice(2,7);
+}
+// Devuelve la clave a usar y, si hace falta, muda el contenido de la clave
+// vieja a la nueva. Si la obra no tiene ancla, devuelve el slug de siempre.
+function _axoClaveObraConAncla(prefijo){
+  const legado = prefijo + _axoSlugObra();
+  if(!obraAnclaActual) return legado;
+  const conAncla = prefijo + obraAnclaActual;
+  try{
+    if(localStorage.getItem(conAncla) === null && localStorage.getItem(legado) !== null){
+      // Mudanza unica: pasa por el setItem interceptado para que suba a la nube.
+      localStorage.setItem(conAncla, localStorage.getItem(legado));
+      console.warn('[Obra] contenido mudado a la clave estable:', legado, '->', conAncla);
+    }
+  }catch(e){ console.warn('[Obra] no se pudo mudar a la clave estable', e && e.name); }
+  return conAncla;
+}
+
+function libroKey(){
+  return _axoClaveObraConAncla('axo_libro_');
 }
 function getLibro(){ try{ return JSON.parse(localStorage.getItem(libroKey())||'{"entradas":[]}'); }catch(e){ return {entradas:[]}; } }
 function saveLibro(o){
@@ -13323,9 +13928,7 @@ function renderLibroObra(){
 // INFORME CLIENTE — link público de avances de obra
 // ════════════════════════════════════════════════════════
 function informeKey(){
-  const cli=document.getElementById('p-cliente')?.value||'';
-  const proy=document.getElementById('p-proyecto')?.value||'';
-  return 'axo_informe_'+(cli+'|'+proy).replace(/[^a-zA-Z0-9]/g,'_');
+  return _axoClaveObraConAncla('axo_informe_');
 }
 function getInforme(){ try{ return JSON.parse(localStorage.getItem(informeKey())||'{}'); }catch(e){ return {}; } }
 function saveInforme(o){ try{ localStorage.setItem(informeKey(), JSON.stringify(o)); }catch(e){ alert('No hay espacio para guardar.'); } }
@@ -15464,6 +16067,9 @@ function serializarProyectoActual() {
   return {
     version: 1,
     guardadoEn: new Date().toISOString(),
+    // Ancla estable de la obra: se fija en el primer guardado y no cambia mas,
+    // asi el Libro y el Informe no se pierden si despues se renombra al cliente.
+    obraAncla: (obraAnclaActual || (obraAnclaActual = axoNuevaAnclaObra())),
     pfGuardado: cAct.pf || 0,
     cdGuardado: cAct.cd || 0,
     cliente:    document.getElementById('p-cliente')?.value || '',
@@ -15510,6 +16116,10 @@ function serializarProyectoActual() {
 }
 
 function aplicarProyectoSerializado(data) {
+  // El ancla viaja con el proyecto. Las obras guardadas antes del 06/08/2026
+  // no la tienen: quedan en null y siguen usando el slug de siempre, hasta
+  // que se las vuelva a guardar.
+  obraAnclaActual = data.obraAncla || null;
   const setVal = (id, val) => { const el = document.getElementById(id); if (el && val !== undefined) el.value = val; };
   setVal('p-cliente', data.cliente);
   setVal('p-proyecto', data.proyecto);
@@ -15800,6 +16410,7 @@ function nuevoProyectoVacio() {
   cantidades = {}; subcontratos = {}; etapasPct = { C1:35, C2:35, C3:25, R:5 }; etapaRubro = {};
   cronograma = {}; cronogramaAdic = {}; cronogramaRealAdic = {}; cronogramaReal = {}; fechaInicioReal = null; adjudicaciones = {}; proveedoresAdj = { mat:['','',''], mo:['','',''], sub:['','',''] }; ejecucion = {}; certRet = { modo:'pct', val:0 }; cobrosReales = {}; movimientos = []; cronoSemanas = 13; cuadrillaTamano = 3; dependenciasRubro = {}; cronogramaSeleccion.clear();
   proyectoActualNombre = null;
+  obraAnclaActual = null;   // obra nueva: ancla propia, para no heredar el Libro de la anterior
   estadoProyecto = 'no_aprobado'; snapshotAprobado = null; adicionales = []; itemsManuales = []; adelantos = [];
   vencimientos = { actaEntrega:'', subcontratos:{} };
   hitos = []; cortesAdmin = [];
@@ -16002,6 +16613,7 @@ function confirmarImportExcel() {
   etapasPct = { C1:35, C2:35, C3:25, R:5 };
   cronograma = {}; cronogramaAdic = {}; cronogramaRealAdic = {}; cronogramaReal = {}; fechaInicioReal = null; adjudicaciones = {}; proveedoresAdj = { mat:['','',''], mo:['','',''], sub:['','',''] }; ejecucion = {}; certRet = { modo:'pct', val:0 }; cobrosReales = {}; movimientos = []; cronoSemanas = 13; cuadrillaTamano = 3; dependenciasRubro = {}; cronogramaSeleccion.clear();
   proyectoActualNombre = null;
+  obraAnclaActual = null;   // obra nueva: ancla propia, para no heredar el Libro de la anterior
   estadoProyecto = 'no_aprobado'; snapshotAprobado = null; adicionales = []; itemsManuales = []; adelantos = [];
   vencimientos = { actaEntrega:'', subcontratos:{} };
   hitos = []; cortesAdmin = [];
@@ -16238,6 +16850,7 @@ function crearProyectoDesdePlantilla(nombre) {
   etapasPct = { C1:35, C2:35, C3:25, R:5 };
   cronograma = {}; cronogramaAdic = {}; cronogramaRealAdic = {}; cronogramaReal = {}; fechaInicioReal = null; adjudicaciones = {}; proveedoresAdj = { mat:['','',''], mo:['','',''], sub:['','',''] }; ejecucion = {}; certRet = { modo:'pct', val:0 }; cobrosReales = {}; movimientos = []; cronoSemanas = 13; cuadrillaTamano = 3; dependenciasRubro = {}; cronogramaSeleccion.clear();
   proyectoActualNombre = null;
+  obraAnclaActual = null;   // obra nueva: ancla propia, para no heredar el Libro de la anterior
   estadoProyecto = 'no_aprobado'; snapshotAprobado = null; adicionales = []; itemsManuales = []; adelantos = [];
   vencimientos = { actaEntrega:'', subcontratos:{} };
   hitos = []; cortesAdmin = [];
@@ -17192,7 +17805,10 @@ async function marcarDocumentoDescargado(tipo) {
 
   localStorage.setItem = function(clave, valor){
     _setItem(clave, valor);
-    const esSync = CLAVES_SYNC.includes(clave) || (clave && clave.startsWith('axo_libro_'));
+    // 06/08/2026 — antes aca decia solo startsWith('axo_libro_'), asi que el
+    // Informe Cliente quedaba afuera de la subida automatica. Ahora se
+    // consulta la lista de prefijos, que cubre Libro e Informe.
+    const esSync = CLAVES_SYNC.includes(clave) || axoEsClaveDinamica(clave);
     if(esSync && typeof supa !== 'undefined' && supa){
       pendientes[clave] = true;
       if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(clave);
