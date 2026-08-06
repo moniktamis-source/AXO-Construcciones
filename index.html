@@ -1827,6 +1827,9 @@ async function axoCheckSesion(){
   }catch(e){}
 }
 window.addEventListener('load', axoCheckSesion);
+window.addEventListener('load', function(){
+  try{ window.__axoEstado.pendientes = axoContarPendientes(); pintarEstadoSync(); }catch(e){}
+});
 
 // ════════════════════════════════════════════════════════
 // VISTA CLIENTE — si la URL tiene ?cliente=código, mostrar informe público
@@ -3256,51 +3259,235 @@ async function subirLibrosNube(){
 // función los sube ahora mismo, ANTES de bajar la nube — así sincronizarDesdeNube()
 // no los pisa con la versión vieja. La lista persiste en 'axo_pend_subida' (a
 // diferencia de window.__axoClavesEnVuelo, que es en memoria y se pierde al recargar).
+function esVacioAxo(txt){
+  if(txt === null || txt === undefined) return true;
+  const t = String(txt).trim();
+  return t === '' || t === '{}' || t === '[]' || t === 'null';
+}
+
+// PROTECCION ANTI-BORRADO (05/08/2026)
+// Antes esta funcion subia a ciegas todo lo que estuviera en 'axo_pend_subida'.
+// Como esa lista sobrevive al cierre de la pestana y a los apagones, un
+// dispositivo con una copia vieja imponia su version sobre la nube CADA VEZ
+// que se abria el sistema. Eso fue lo que vacio Gabinete, Plantillas y
+// Proveedores el 05/08 a las 22:55 UTC en 4 segundos.
+// Ahora, antes de subir cada clave, se compara contra la nube y se descarta
+// la subida en dos casos: si lo local esta vacio y la nube no, y si la nube
+// es mas nueva que la ultima edicion local. Ante la duda, NO se sube.
 async function flushPendientesAntesDeBajar(){
   if(!supa) return;
   let pend = [];
   try{ pend = JSON.parse(localStorage.getItem('axo_pend_subida')||'[]'); }catch(e){ pend = []; }
   if(!pend.length) return;
+
+  let ts = {};
+  try{ ts = JSON.parse(localStorage.getItem('axo_ts_local')||'{}'); }catch(e){ ts = {}; }
+
+  let nube = {};
+  try{
+    const { data, error } = await supa.from('axo_datos').select('clave,valor,actualizado').in('clave', pend);
+    if(error) throw error;
+    (data||[]).forEach(r=>{ nube[r.clave] = r; });
+  }catch(e){
+    // Si no podemos leer la nube no sabemos si pisariamos algo bueno: no subimos nada.
+    console.warn('[flush] no se pudo leer la nube, no se sube nada por precaucion', e);
+    return;
+  }
+
   const siguenPendientes = [];
+  const descartadas = [];
   for(const k of pend){
+    const local = localStorage.getItem(k);
+    if(local === null) continue;
+
+    const enNube = nube[k];
+    if(enNube){
+      const txtNube = JSON.stringify(enNube.valor);
+      if(esVacioAxo(local) && !esVacioAxo(txtNube)){
+        descartadas.push(k + ' (local vacio, la nube tiene datos)'); continue;
+      }
+      const tLocal = ts[k] ? Date.parse(ts[k]) : 0;
+      const tNube  = enNube.actualizado ? Date.parse(enNube.actualizado) : 0;
+      if(tNube && (!tLocal || tNube > tLocal)){
+        descartadas.push(k + ' (la nube es mas nueva)'); continue;
+      }
+    }
+
     if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(k);
     const ok = await subirNube(k);
-    if(ok){
-      if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k);
-    } else {
-      siguenPendientes.push(k); // no se pudo subir todavía: se queda "en vuelo" para que la bajada no la pise
-    }
+    if(ok){ if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.delete(k); }
+    else { siguenPendientes.push(k); }
   }
   try{ localStorage.setItem('axo_pend_subida', JSON.stringify(siguenPendientes)); }catch(e){}
+  if(descartadas.length) console.warn('[flush] subidas descartadas para no borrar datos ajenos:', descartadas);
 }
 
-// Baja todo desde la nube y lo escribe en localStorage
-async function sincronizarDesdeNube(){
-  if(!supa) return;
+// ── Estado de sincronizacion, visible siempre (nada de fallar en silencio) ──
+window.__axoEstado = { pendientes:0, sinEspacio:[], ultimaBajada:null, hayNuevos:false };
+
+function pintarEstadoSync(){
+  let el = document.getElementById('axo-estado-sync');
+  if(!el){
+    if(!document.body) return;
+    el = document.createElement('div');
+    el.id = 'axo-estado-sync';
+    el.style.cssText = 'position:fixed;right:12px;bottom:12px;z-index:99999;font:600 12px system-ui,-apple-system,sans-serif;padding:7px 12px;border-radius:99px;box-shadow:0 2px 10px rgba(0,0,0,.18);color:#fff;max-width:60vw';
+    document.body.appendChild(el);
+  }
+  const s = window.__axoEstado;
+  if(s.sinEspacio.length){
+    el.style.background = '#C00000';
+    el.textContent = 'No entra mas en este dispositivo (' + s.sinEspacio.length + ') - avisa';
+    el.title = 'No se pudieron guardar localmente: ' + s.sinEspacio.join(', ');
+  } else if(s.pendientes > 0){
+    el.style.background = '#E08600';
+    el.textContent = s.pendientes + ' cambio' + (s.pendientes>1?'s':'') + ' sin subir';
+    el.title = 'Se reintenta solo. No cierres el sistema hasta que diga Todo guardado.';
+  } else if(s.hayNuevos){
+    el.style.background = '#2E6DA4';
+    el.textContent = 'Datos nuevos - salí del campo para verlos';
+    el.title = 'Llegaron cambios de otro equipo mientras escribias.';
+  } else {
+    el.style.background = '#4A6741';
+    el.textContent = 'Todo guardado' + (s.ultimaBajada ? ' - ' + s.ultimaBajada : '');
+    el.title = 'Ultima bajada de la nube: ' + (s.ultimaBajada || '-');
+  }
+}
+
+function axoContarPendientes(){
+  try{ return (JSON.parse(localStorage.getItem('axo_pend_subida')||'[]')||[]).length; }catch(e){ return 0; }
+}
+
+// ── Que pestana esta abierta ahora ──
+function tabActivoNombre(){
+  const el = document.querySelector('.page.active');
+  if(!el || !el.id) return null;
+  return el.id.replace(/^tab-/, '');
+}
+
+// Mapa pestana -> funciones de dibujo PURAS (sin efectos secundarios ni
+// inicializaciones). Antes la bajada de la nube solo repintaba 8 pantallas de
+// las 68 que tiene el sistema: los datos llegaban pero Compras, Seguimiento,
+// Clientes, Proveedores, Costeo, Flujo y Actividad seguian mostrando lo viejo,
+// y el cartel decia "Datos actualizados" igual. Por eso el boton parecia de adorno.
+const AXO_RENDER_TAB = {
+  'proyectos':            ['renderListaProyectos'],
+  'plantillas':           ['renderListaPlantillas'],
+  'gabinete':             ['renderGabinete'],
+  'relevamiento':         ['renderRelevamiento'],
+  'libroobra':            ['renderLibroObra'],
+  'actividad':            ['renderActividad'],
+  'clientes':             ['renderClientes'],
+  'proveedores':          ['renderProveedores'],
+  'crm':                  ['renderCRM'],
+  'dashglobal':           ['renderDashGlobal'],
+  'dashproyecto':         ['renderDashProyecto'],
+  'banco':                ['renderBanco'],
+  'compras':              ['renderComprasCompleto'],
+  'costeo':               ['renderCosteo'],
+  'flujo':                ['renderFlujo'],
+  'etapas':               ['renderEtapas'],
+  'adjudicados':          ['renderAdjudicados'],
+  'comparativo':          ['renderComparativo'],
+  'histprecios':          ['renderHistPrecios'],
+  'certcliente':          ['renderCertCliente'],
+  'informecliente':       ['renderInformeCliente'],
+  'vencimientos':         ['renderVencimientos'],
+  'oferta':               ['renderOfertaPreview','renderHojaCaracteristicas'],
+  'cronograma-plan':      ['renderGantt'],
+  'cronograma-ejecucion': ['renderGanttReal']
+};
+
+function repintarTabActivo(){
+  const fallaron = [];
+  try{ if(typeof aplicarBancoGuardado==='function') aplicarBancoGuardado(); }catch(e){ console.warn('[repintar] banco', e); }
+  try{ if(typeof refrescarDatalistsCP==='function') refrescarDatalistsCP(); }catch(e){}
+  const name = tabActivoNombre();
+  const fns = (name && AXO_RENDER_TAB[name]) ? AXO_RENDER_TAB[name] : [];
+  fns.forEach(function(fn){
+    try{ if(typeof window[fn] === 'function') window[fn](); }
+    catch(e){ fallaron.push(fn); console.warn('[repintar]', fn, e); }
+  });
+  try{
+    const pv = document.getElementById('crm-vista-planner');
+    if(name==='crm' && pv && pv.style.display!=='none' && typeof renderPlanner==='function') renderPlanner();
+  }catch(e){}
+  return { tab: name, fallaron: fallaron };
+}
+
+// Baja todo desde la nube, lo escribe en localStorage y REPINTA lo que estas mirando
+async function sincronizarDesdeNube(opts){
+  if(!supa) return false;
+  const manual = !!(opts && opts.manual);
   try{
     const { data, error } = await supa.from('axo_datos').select('clave,valor');
-    if(error){ console.warn('sync error', error); return; }
-    if(data){
-      data.forEach(row=>{
-        if (window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(row.clave)) return; // hay un cambio local subiendo todavía, no lo pisamos
-        try{ localStorage.setItem(row.clave, JSON.stringify(row.valor)); }catch(e){}
-      });
-      // No refrescar si el usuario está escribiendo en un campo (para no interrumpir)
-      const activo = document.activeElement;
-      const editando = activo && (activo.tagName==='INPUT' || activo.tagName==='TEXTAREA' || activo.tagName==='SELECT');
-      if(editando) return;
-      try{ if(typeof aplicarBancoGuardado==='function' && aplicarBancoGuardado()){ const _bt=document.getElementById('tab-banco'); if(typeof renderBanco==='function' && _bt && _bt.offsetParent!==null) renderBanco(); } }catch(e){}
-      // refrescar pantallas con los datos que llegaron
-      try{ if(typeof renderListaProyectos==='function') renderListaProyectos(); }catch(e){}
-      try{ if(typeof renderGabinete==='function') renderGabinete(); }catch(e){}
-      try{ if(typeof renderRelevamiento==='function' && typeof relevActivo!=='undefined') renderRelevamiento(); }catch(e){}
-      try{ if(typeof renderLibroObra==='function') renderLibroObra(); }catch(e){}
-      try{ if(typeof renderPlantillas==='function') renderPlantillas(); }catch(e){}
-      try{ if(typeof refrescarDatalistsCP==='function') refrescarDatalistsCP(); }catch(e){}
-      try{ const _tcrm=document.getElementById('tab-crm'); if(typeof renderCRM==='function' && _tcrm && _tcrm.classList.contains('active')) renderCRM(); }catch(e){}
-      try{ const _pv=document.getElementById('crm-vista-planner'); if(typeof renderPlanner==='function' && _pv && _pv.style.display!=='none') renderPlanner(); }catch(e){}
+    if(error){
+      console.warn('sync error', error);
+      if(manual) alert('No se pudo bajar de la nube.\n\n' + (error.message || 'Error de conexion') + '\n\nTus datos locales estan intactos.');
+      return false;
     }
-  }catch(e){ console.warn('sincronizarDesdeNube', e); }
+    if(!data) return false;
+
+    let cambiadas = 0;
+    const sinEspacio = [];
+    data.forEach(row=>{
+      if (window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(row.clave)) return; // hay un cambio local subiendo todavia
+      const nuevo = JSON.stringify(row.valor);
+      if(localStorage.getItem(row.clave) === nuevo) return; // ya estaba igual
+      try{ localStorage.setItem(row.clave, nuevo); cambiadas++; }
+      catch(e){
+        // ANTES esto era catch(e){} y se perdia sin decir nada: el dispositivo se
+        // quedaba con datos incompletos y nadie se enteraba. Ahora se avisa.
+        sinEspacio.push(row.clave);
+        console.warn('[sync] no entro en este dispositivo:', row.clave, e && e.name);
+      }
+    });
+
+    window.__axoEstado.sinEspacio = sinEspacio;
+    window.__axoEstado.pendientes = axoContarPendientes();
+    window.__axoEstado.ultimaBajada = new Date().toLocaleTimeString('es-PY',{hour:'2-digit',minute:'2-digit'});
+
+    // Si esta escribiendo, no le pisamos el campo. Pero tampoco nos callamos:
+    // se avisa y se repinta apenas suelta el campo.
+    const activo = document.activeElement;
+    const editando = activo && (activo.tagName==='INPUT' || activo.tagName==='TEXTAREA' || activo.tagName==='SELECT');
+    if(editando && cambiadas > 0){
+      window.__axoEstado.hayNuevos = true;
+      pintarEstadoSync();
+      if(!window.__axoEsperandoFoco){
+        window.__axoEsperandoFoco = true;
+        const alSalir = function(){
+          window.__axoEsperandoFoco = false;
+          window.__axoEstado.hayNuevos = false;
+          repintarTabActivo();
+          pintarEstadoSync();
+          document.removeEventListener('focusout', alSalir);
+        };
+        document.addEventListener('focusout', alSalir);
+      }
+      if(manual && typeof mostrarToastGuardado==='function') mostrarToastGuardado('Llegaron datos nuevos - se muestran al salir del campo');
+      return true;
+    }
+
+    window.__axoEstado.hayNuevos = false;
+    const r = repintarTabActivo();
+    pintarEstadoSync();
+
+    if(manual){
+      if(sinEspacio.length){
+        alert('Se bajaron los datos, pero ' + sinEspacio.length + ' no entraron en este dispositivo por falta de espacio:\n\n' + sinEspacio.join(', ') + '\n\nEste equipo esta mostrando informacion incompleta. Hay que liberar espacio antes de seguir cargando.');
+      } else if(r.fallaron.length){
+        alert('Se bajaron los datos, pero la pantalla "' + (r.tab||'?') + '" no se pudo redibujar.\nProba cambiar de pestana y volver.');
+      } else if(typeof mostrarToastGuardado==='function'){
+        mostrarToastGuardado(cambiadas ? ('Actualizado - ' + cambiadas + ' cambio' + (cambiadas>1?'s':'') + ' desde la nube') : 'Ya estabas al dia');
+      }
+    }
+    return true;
+  }catch(e){
+    console.warn('sincronizarDesdeNube', e);
+    if(manual) alert('No se pudo actualizar.\n\n' + (e && e.message ? e.message : e) + '\n\nTus datos locales estan intactos.');
+    return false;
+  }
 }
 
 // Sube todo lo local a la nube (botón manual de respaldo)
@@ -3370,11 +3557,12 @@ async function subirTodoNube(){
   else alert('Datos subidos a la nube.');
 }
 
+// El cartel de exito ahora lo decide sincronizarDesdeNube segun lo que REALMENTE paso.
+// Antes se mostraba "Datos actualizados desde la nube" siempre, incluso cuando
+// la bajada fallaba o no se repintaba ninguna pantalla.
 async function bajarTodoNube(){
-  if(!supa){ alert('No hay conexión con la nube.'); return; }
-  await sincronizarDesdeNube();
-  if(typeof mostrarToastGuardado==='function') mostrarToastGuardado('Datos actualizados desde la nube ☁');
-  else alert('Datos actualizados desde la nube.');
+  if(!supa){ alert('No hay conexion con la nube.'); return; }
+  await sincronizarDesdeNube({ manual:true });
 }
 
 // Sincronización automática: baja de la nube cada 20 segundos (si hay sesión)
@@ -16417,9 +16605,20 @@ async function marcarDocumentoDescargado(tipo) {
       }
     }
     clearTimeout(timer);
+    try{ window.__axoEstado.pendientes = axoContarPendientes(); pintarEstadoSync(); }catch(e){}
     if(Object.keys(pendientes).length){
       timer = setTimeout(procesarPendientes, huboFalla ? 8000 : 1500); // reintenta cada 8s si hubo error
     }
+  }
+
+  // Marca de tiempo por clave: cuando se edito por ultima vez EN ESTE dispositivo.
+  // flushPendientesAntesDeBajar() la usa para no pisar la nube con una copia vieja.
+  function _marcarHora(clave){
+    try{
+      const m = JSON.parse(localStorage.getItem('axo_ts_local')||'{}');
+      m[clave] = new Date().toISOString();
+      _setItem('axo_ts_local', JSON.stringify(m));
+    }catch(e){}
   }
 
   localStorage.setItem = function(clave, valor){
@@ -16429,6 +16628,8 @@ async function marcarDocumentoDescargado(tipo) {
       pendientes[clave] = true;
       if (window.__axoClavesEnVuelo) window.__axoClavesEnVuelo.add(clave);
       _marcarPendiente(clave);
+      _marcarHora(clave);
+      try{ window.__axoEstado.pendientes = axoContarPendientes(); pintarEstadoSync(); }catch(e){}
       clearTimeout(timer);
       timer = setTimeout(procesarPendientes, 1500); // espera 1.5s y sube en lote
     }
