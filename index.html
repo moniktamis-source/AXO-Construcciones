@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-app</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.07-claves</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -9855,10 +9855,13 @@ const COMP_TIPOS = { factura:'🧾 Factura', pago:'💵 Pago', remision:'🚚 Re
 async function cargarComprobantes(silencioso){
   const obra = (typeof claveObraActual === 'function') ? claveObraActual() : '';
   _comprobantesObra = obra;
-  if (!obra || typeof supa === 'undefined' || !supa){ _comprobantes = []; if(!silencioso) renderComprobantes(); return; }
+  // Mismo criterio que el Libro: la obra puede estar guardada en la nube con
+  // un nombre distinto al que arma el sistema. Se buscan todas las variantes.
+  const claves = axoClavesDeObra();
+  if (!claves.length || typeof supa === 'undefined' || !supa){ _comprobantes = []; if(!silencioso) renderComprobantes(); return; }
   try{
     const { data, error } = await supa.from('axo_comprobantes')
-      .select('*').eq('obra', obra).eq('borrado', false)
+      .select('*').in('obra', claves).eq('borrado', false)
       .order('fecha', { ascending:false }).order('creado', { ascending:false });
     if (error) throw error;
     _comprobantes = data || [];
@@ -9951,7 +9954,9 @@ async function subirComprobanteDesdeSistema(input){
   const files = Array.from(input.files||[]);
   input.value = '';
   if (!files.length) return;
-  const obra = claveObraActual();
+  // Se guarda con el nombre con el que la obra vive en la nube, que es el que
+  // usa la app del celular. Asi los dos lados escriben bajo la misma clave.
+  const obra = axoClavesDeObra()[0];
   if (!obra){ alert('Primero elegí la obra.'); return; }
   if (!supa){ alert('No hay conexión con la nube.'); return; }
   const tipo = document.getElementById('comp-tipo-nuevo')?.value || 'factura';
@@ -13489,15 +13494,45 @@ function claveObraActual(){
                    document.getElementById('p-proyecto')?.value);
 }
 
+// ═══════════════════════════════════════════════════════════════════════
+// TODAS LAS CLAVES CON LAS QUE PUEDE ESTAR GUARDADA ESTA OBRA (07/08/2026)
+//
+// El problema que resuelve: la app del celular muestra las obras con el
+// nombre con el que estan guardadas en la nube, que es 'proyectoActualNombre'
+// — y ese nombre lo escribis vos en el cuadro que aparece al guardar. Puede
+// ser cualquier cosa.
+//
+// El sistema, en cambio, buscaba las cargas armando la clave por su cuenta:
+// cliente + ' — ' + proyecto. Si al guardar aceptaste el nombre sugerido,
+// las dos coinciden y todo anda. Si le cambiaste una coma, un acento o el
+// orden, no coinciden NUNCA y las cargas del celular no aparecen: quedan en
+// la nube, guardadas, pero el sistema las busca bajo otro nombre.
+//
+// Ahora se busca por las tres formas a la vez. Es una lista de posibilidades,
+// no un cambio de criterio: nada de lo que ya funcionaba deja de funcionar.
+// ═══════════════════════════════════════════════════════════════════════
+function axoClavesDeObra(){
+  const claves = [];
+  const sumar = function(v){
+    v = (v||'').trim();
+    if(v && claves.indexOf(v) === -1) claves.push(v);
+  };
+  sumar(typeof proyectoActualNombre !== 'undefined' ? proyectoActualNombre : '');  // como se llama en la nube
+  sumar(claveObraActual());                                                        // cliente — proyecto
+  sumar(nombreObraActual());                                                       // solo el proyecto (formato viejo)
+  return claves;
+}
+
 // Trae de la nube lo pendiente de ESTA obra
 async function cargarPendientesLibro(silencioso){
   const obra = nombreObraActual();
   if (!obra || typeof supa === 'undefined' || !supa) { _libroPendientes = []; return; }
   _libroPendientesCargando = true;
   try {
-    // Se aceptan las dos formas: la clave nueva (cliente — proyecto) y la
-    // vieja (solo proyecto), para no perder lo cargado antes del cambio.
-    const claves = [...new Set([claveObraActual(), obra].filter(Boolean))];
+    // Se aceptan TODAS las formas posibles: el nombre con el que la obra esta
+    // guardada en la nube, la clave cliente — proyecto, y el formato viejo de
+    // solo el proyecto. Ver axoClavesDeObra().
+    const claves = axoClavesDeObra();
     const { data, error } = await supa.from('axo_libro_bot')
       .select('*').in('obra', claves).eq('estado', 'pendiente')
       .order('fecha', { ascending: false });
