@@ -1,0 +1,606 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>AXO Obra</title>
+<meta name="robots" content="noindex">
+
+<!-- El manifiesto es un ARCHIVO, no un blob armado en JavaScript.
+     Ese era el motivo por el que el teléfono nunca ofrecía instalar. -->
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#4A6741">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AXO Obra">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<link rel="apple-touch-icon" href="icono-192.png">
+<link rel="icon" type="image/png" href="icono-192.png">
+
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:opsz,wght@9..144,500;9..144,600&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+
+<style>
+  :root{
+    --verde:#4A6741; --verde-osc:#2E4029; --verde-claro:#E8F0E5;
+    --crema:#F6F3EC; --tinta:#262620; --suave:#6B6A62; --linea:#DAD6C8;
+    --naranja:#C05000; --rojo:#B3261E;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; background:var(--crema); color:var(--tinta);
+       font-family:'Inter',system-ui,sans-serif; line-height:1.5; }
+  body{ padding-bottom:calc(28px + env(safe-area-inset-bottom)); }
+
+  .barra{ position:sticky; top:0; z-index:20; background:var(--verde);
+          color:#fff; padding:calc(12px + env(safe-area-inset-top)) 14px 12px;
+          display:flex; align-items:center; gap:11px; }
+  .barra b{ font-family:'Fraunces',serif; font-weight:600; font-size:17px; flex:1;
+            overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .volver{ background:rgba(255,255,255,.16); border:none; color:#fff; width:34px; height:34px;
+           border-radius:9px; font-size:19px; cursor:pointer; flex:none; line-height:1; }
+  .salir{ background:none; border:none; color:rgba(255,255,255,.85); font-size:12px;
+          cursor:pointer; font-weight:600; flex:none; }
+
+  .env{ max-width:560px; margin:0 auto; padding:18px 14px 30px; }
+  h1{ font-family:'Fraunces',serif; font-weight:600; font-size:25px; line-height:1.15;
+      color:var(--verde-osc); margin:0 0 5px; }
+  .sub{ font-size:14px; color:var(--suave); margin:0 0 20px; }
+
+  .caja{ background:#fff; border:1px solid var(--linea); border-radius:14px;
+         padding:15px; margin-bottom:13px; }
+  label.b{ display:block; font-size:13px; font-weight:600; color:var(--verde-osc); margin-bottom:7px; }
+
+  .btn{ display:flex; align-items:center; justify-content:center; gap:9px; width:100%;
+        padding:16px; margin-bottom:10px; font-size:16px; font-weight:600;
+        font-family:'Inter',sans-serif; border-radius:12px; cursor:pointer;
+        border:2px solid var(--verde); background:#fff; color:var(--verde-osc); }
+  .btn:active{ transform:scale(.985); }
+  .btn.lleno{ background:var(--verde); color:#fff; }
+  .btn.lleno:disabled{ background:#9db095; border-color:#9db095; }
+  .btn.chico{ padding:11px; font-size:14px; margin-bottom:8px; }
+
+  .tarjeta{ display:flex; align-items:center; gap:13px; width:100%; text-align:left;
+            background:#fff; border:1px solid var(--linea); border-radius:14px;
+            padding:17px 15px; margin-bottom:11px; cursor:pointer; font-family:inherit; }
+  .tarjeta:active{ background:var(--verde-claro); }
+  .tarjeta .ico{ font-size:26px; flex:none; }
+  .tarjeta .t{ flex:1; min-width:0; }
+  .tarjeta .t b{ display:block; font-size:16px; color:var(--verde-osc); font-weight:600;
+                 overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .tarjeta .t span{ font-size:12.5px; color:var(--suave); }
+  .tarjeta .fl{ color:var(--linea); font-size:20px; flex:none; }
+
+  input[type=date], input[type=email], input[type=password], textarea, select{
+    width:100%; padding:13px; font-size:16px; font-family:'Inter',sans-serif;
+    border:1px solid var(--linea); border-radius:10px; background:#fff; color:var(--tinta); }
+  textarea{ min-height:88px; resize:vertical; }
+  select{ appearance:none; background-image:url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8'%3E%3Cpath d='M1 1l5 5 5-5' stroke='%236B6A62' stroke-width='2' fill='none'/%3E%3C/svg%3E");
+          background-repeat:no-repeat; background-position:right 14px center; padding-right:36px; }
+
+  .tipos{ display:flex; gap:7px; flex-wrap:wrap; margin-bottom:4px; }
+  .tipos button{ flex:1; min-width:74px; padding:11px 6px; border-radius:10px; cursor:pointer;
+                 border:1.5px solid var(--linea); background:#fff; color:var(--suave);
+                 font-family:inherit; font-size:13px; font-weight:600; }
+  .tipos button.on{ border-color:var(--verde); background:var(--verde-claro); color:var(--verde-osc); }
+
+  .grilla{ display:flex; gap:8px; flex-wrap:wrap; margin-top:11px; }
+  .mini{ position:relative; width:84px; height:84px; border-radius:10px; overflow:hidden;
+         background:#eee; border:1px solid var(--linea); }
+  .mini img,.mini video{ width:100%; height:100%; object-fit:cover; display:block; }
+  .mini .pdf{ display:flex; align-items:center; justify-content:center; height:100%;
+              flex-direction:column; gap:3px; font-size:11px; color:var(--suave); background:#fff; }
+  .mini .x{ position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%;
+            border:2px solid #fff; background:var(--rojo); color:#fff; font-size:13px;
+            font-weight:700; line-height:1; cursor:pointer; }
+
+  .aviso{ border-radius:11px; padding:12px 14px; font-size:13.5px; margin-bottom:13px; line-height:1.45; }
+  .aviso.mal{ background:#FDECEA; color:var(--rojo); border:1px solid #F5C6C2; }
+  .aviso.ok{ background:var(--verde-claro); color:var(--verde-osc); border:1px solid #C3D6BC; }
+  .aviso.info{ background:#FFF8E8; color:#8A5A00; border:1px solid #F0DFB8; }
+
+  .barrita{ height:7px; background:var(--linea); border-radius:4px; overflow:hidden; margin:11px 0 7px; }
+  .barrita div{ height:100%; width:0; background:var(--verde); transition:width .25s; }
+  .estado{ font-size:12.5px; color:var(--suave); text-align:center; }
+
+  .vacio{ text-align:center; color:var(--suave); font-size:14px; padding:34px 12px; }
+  .pie{ text-align:center; font-size:11.5px; color:var(--suave); margin-top:22px; }
+  .oculto{ display:none !important; }
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <button class="volver oculto" id="btn-volver" onclick="volver()">‹</button>
+  <b id="titulo">AXO Obra</b>
+  <button class="salir oculto" id="btn-salir" onclick="salir()">Salir</button>
+</div>
+
+<div class="env">
+
+  <!-- ── INGRESO ── -->
+  <section id="p-login" class="oculto">
+    <h1>Entrar</h1>
+    <p class="sub">Con el mismo usuario del sistema AXO.</p>
+    <div id="login-error" class="aviso mal oculto"></div>
+    <div class="caja">
+      <label class="b" for="email">Correo</label>
+      <input type="email" id="email" autocomplete="username" inputmode="email" placeholder="obra@axo.com" style="margin-bottom:13px">
+      <label class="b" for="pass">Contraseña</label>
+      <input type="password" id="pass" autocomplete="current-password" placeholder="••••••••">
+    </div>
+    <button class="btn lleno" id="btn-entrar" onclick="entrar()">Entrar</button>
+    <p class="pie">Si no te acordás la contraseña, pedísela a la administración.</p>
+  </section>
+
+  <!-- ── MENÚ ── -->
+  <section id="p-menu" class="oculto">
+    <h1>¿Qué vas a cargar?</h1>
+    <p class="sub" id="menu-quien"></p>
+    <button class="tarjeta" onclick="irA('compras')">
+      <span class="ico">🧾</span>
+      <span class="t"><b>Compras</b><span>Facturas, pagos y remisiones</span></span>
+      <span class="fl">›</span>
+    </button>
+    <button class="tarjeta" onclick="irA('libro')">
+      <span class="ico">📖</span>
+      <span class="t"><b>Libro de Obra</b><span>Avance del día, fotos y video</span></span>
+      <span class="fl">›</span>
+    </button>
+  </section>
+
+  <!-- ── OBRAS ── -->
+  <section id="p-obras" class="oculto">
+    <h1>¿En qué obra?</h1>
+    <p class="sub" id="obras-sub">Obras aprobadas y en ejecución.</p>
+    <div id="obras-lista"></div>
+  </section>
+
+  <!-- ── CARGA ── -->
+  <section id="p-carga" class="oculto">
+    <h1 id="carga-titulo">Carga</h1>
+    <p class="sub" id="carga-obra"></p>
+    <div id="carga-error" class="aviso mal oculto"></div>
+
+    <div class="caja" id="caja-tipo">
+      <label class="b">Tipo de documento</label>
+      <div class="tipos" id="tipos"></div>
+    </div>
+
+    <div class="caja">
+      <label class="b" for="fecha">Fecha</label>
+      <input type="date" id="fecha">
+    </div>
+
+    <div class="caja">
+      <label class="b" for="comentario">Comentario</label>
+      <textarea id="comentario" placeholder="Escribí acá lo que haga falta aclarar…"></textarea>
+    </div>
+
+    <label class="btn chico" style="cursor:pointer">
+      📷 Sacar foto
+      <input type="file" accept="image/*" capture="environment" multiple class="oculto" onchange="agregar(this,'img')">
+    </label>
+    <label class="btn chico" style="cursor:pointer">
+      🖼️ Elegir fotos de la galería
+      <input type="file" accept="image/*" multiple class="oculto" onchange="agregar(this,'img')">
+    </label>
+    <label class="btn chico oculto" id="btn-pdf" style="cursor:pointer">
+      📄 Adjuntar PDF
+      <input type="file" accept="application/pdf" multiple class="oculto" onchange="agregar(this,'pdf')">
+    </label>
+    <label class="btn chico oculto" id="btn-video" style="cursor:pointer">
+      🎥 Grabar o subir video
+      <input type="file" accept="video/*" class="oculto" onchange="agregar(this,'vid')">
+    </label>
+
+    <div class="grilla" id="grilla"></div>
+
+    <div id="progreso" class="oculto">
+      <div class="barrita"><div id="barra-pct"></div></div>
+      <div class="estado" id="estado-txt"></div>
+    </div>
+
+    <button class="btn lleno" id="btn-enviar" style="margin-top:15px" onclick="enviar()">Enviar</button>
+  </section>
+
+  <!-- ── LISTO ── -->
+  <section id="p-listo" class="oculto">
+    <div class="aviso ok" style="text-align:center;padding:26px 16px">
+      <div style="font-size:38px;margin-bottom:6px">✓</div>
+      <b style="font-size:17px;display:block;margin-bottom:5px">Enviado</b>
+      <span id="listo-detalle" style="font-size:13.5px"></span>
+    </div>
+    <button class="btn lleno" onclick="otraCarga()">Cargar otra cosa</button>
+    <button class="btn" onclick="mostrar('menu')">Volver al menú</button>
+  </section>
+
+  <!-- ── INSTALAR ── -->
+  <div id="caja-instalar" class="aviso info oculto" style="margin-top:20px">
+    <b>Tenelo como aplicación</b><br>
+    <span id="instalar-texto">Se abre solo, sin buscar el link cada vez.</span>
+    <button class="btn chico oculto" id="btn-instalar" style="margin-top:10px" onclick="instalar()">📲 Instalar</button>
+  </div>
+
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// AXO Obra — app de carga desde el celular
+//
+// Escribe en el sistema, no lee datos sensibles. De la obra solo trae el
+// NOMBRE para poder elegirla; nunca se descarga presupuestos, precios ni
+// flujo de caja. Si se pierde el teléfono, no se pierde información.
+//
+//   Compras       → tabla axo_comprobantes (entra directo)
+//   Libro de Obra → tabla axo_libro_bot (entra como pendiente de revisión,
+//                   porque puede terminar en el informe del cliente)
+//
+// Los archivos van al bucket 'libro-obra'. Acá solo viaja el link.
+// ═══════════════════════════════════════════════════════════════════
+
+const SUPABASE_URL = 'https://uhvfnvqjzrwyriwbqvfu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_P71pLzSZflQSHddzvt-90w_uhynN4g6';
+const BUCKET       = 'libro-obra';
+const VIDEO_MAX_MB = 25;      // igual que el sistema
+const FOTO_MAX_PX  = 1600;    // suficiente para leer una factura
+const SEP          = '‖';// separador de fragmentos de obra en la nube
+
+let supa = null;
+try { supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); }
+catch(e){ console.warn('Supabase no cargó', e); }
+
+let SECCION = null;      // 'compras' | 'libro'
+let OBRA    = null;      // 'Cliente — Proyecto'
+let TIPO    = 'factura';
+let adjuntos = [];       // [{file, tipo, url}]
+let USUARIO = '';
+
+const $  = id => document.getElementById(id);
+const PANTALLAS = ['login','menu','obras','carga','listo'];
+
+function mostrar(p){
+  PANTALLAS.forEach(x => $('p-'+x).classList.toggle('oculto', x !== p));
+  $('btn-volver').classList.toggle('oculto', p === 'login' || p === 'menu');
+  $('btn-salir').classList.toggle('oculto', p === 'login');
+  $('caja-instalar').classList.toggle('oculto', p === 'login' || yaInstalada());
+  $('titulo').textContent =
+    p === 'login' ? 'AXO Obra' :
+    p === 'menu'  ? 'AXO Obra' :
+    (SECCION === 'compras' ? 'Compras' : 'Libro de Obra');
+  window.scrollTo(0,0);
+}
+
+function volver(){
+  if (!$('p-carga').classList.contains('oculto') || !$('p-listo').classList.contains('oculto')) mostrar('obras');
+  else mostrar('menu');
+}
+
+// ── Ingreso ───────────────────────────────────────────────────────
+async function entrar(){
+  const email = ($('email').value||'').trim();
+  const pass  = $('pass').value||'';
+  const err = $('login-error');
+  err.classList.add('oculto');
+  if (!email || !pass){ err.textContent = 'Poné tu correo y tu contraseña.'; err.classList.remove('oculto'); return; }
+  if (!supa){ err.textContent = 'No se pudo conectar. Revisá la señal.'; err.classList.remove('oculto'); return; }
+  const btn = $('btn-entrar'); btn.disabled = true; btn.textContent = 'Entrando…';
+  const { data, error } = await supa.auth.signInWithPassword({ email, password: pass });
+  btn.disabled = false; btn.textContent = 'Entrar';
+  if (error){
+    err.textContent = 'No pudimos entrar. Revisá el correo y la contraseña.';
+    err.classList.remove('oculto');
+    return;
+  }
+  USUARIO = (data && data.user && data.user.email) || email;
+  $('pass').value = '';
+  arrancar();
+}
+
+async function salir(){
+  if (!confirm('¿Cerrar sesión en este teléfono?')) return;
+  try { await supa.auth.signOut(); } catch(e){}
+  USUARIO = '';
+  mostrar('login');
+}
+
+function arrancar(){
+  $('menu-quien').textContent = USUARIO ? ('Entraste como ' + USUARIO) : '';
+  const p = new URLSearchParams(location.search);
+  const ir = p.get('ir');
+  if (ir === 'compras' || ir === 'libro') irA(ir);
+  else mostrar('menu');
+}
+
+// ── Obras ─────────────────────────────────────────────────────────
+function irA(seccion){
+  SECCION = seccion;
+  mostrar('obras');
+  cargarObras();
+}
+
+async function cargarObras(){
+  const cont = $('obras-lista');
+  cont.innerHTML = '<div class="vacio">Buscando obras…</div>';
+  if (!supa){ cont.innerHTML = '<div class="aviso mal">Sin conexión. Probá de nuevo cuando tengas señal.</div>'; return; }
+  try{
+    // Solo el nombre y el estado. Nada de precios ni presupuestos.
+    const { data, error } = await supa.from('axo_registros')
+      .select('reg_id,datos,actualizado')
+      .eq('modulo','axo_proyectos').eq('borrado', false)
+      .order('actualizado', { ascending:false });
+    if (error) throw error;
+
+    // Cada obra viaja partida en pedazos; el nombre está en el pedazo base,
+    // que es el único cuyo identificador no lleva el separador.
+    const obras = (data||[])
+      .filter(r => String(r.reg_id).indexOf(SEP) === -1)
+      .filter(r => {
+        const est = r.datos && r.datos.estadoProyecto;
+        return est === 'aprobado' || est === 'finalizado';
+      })
+      .map(r => ({ nombre: r.reg_id, estado: r.datos.estadoProyecto }));
+
+    if (!obras.length){
+      cont.innerHTML = '<div class="vacio">No hay obras aprobadas todavía.<br>Cuando la administración apruebe un proyecto, aparece acá.</div>';
+      return;
+    }
+    cont.innerHTML = obras.map(o =>
+      '<button class="tarjeta" onclick="elegirObra(' + JSON.stringify(o.nombre).replace(/"/g,'&quot;') + ')">' +
+        '<span class="ico">' + (o.estado === 'finalizado' ? '⚫' : '🟢') + '</span>' +
+        '<span class="t"><b>' + esc(o.nombre) + '</b><span>' +
+          (o.estado === 'finalizado' ? 'Finalizada' : 'En ejecución') + '</span></span>' +
+        '<span class="fl">›</span>' +
+      '</button>'
+    ).join('');
+  }catch(e){
+    console.warn(e);
+    cont.innerHTML = '<div class="aviso mal">No se pudo traer la lista de obras.<br>' + esc(e.message||'') + '</div>';
+  }
+}
+
+function esc(s){ return String(s==null?'':s).replace(/[<>&"]/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;'}[c])); }
+
+function elegirObra(nombre){
+  OBRA = nombre;
+  adjuntos = [];
+  TIPO = 'factura';
+  $('fecha').value = new Date().toISOString().split('T')[0];
+  $('comentario').value = '';
+  $('carga-error').classList.add('oculto');
+  $('progreso').classList.add('oculto');
+  $('carga-obra').textContent = nombre;
+  const esCompras = SECCION === 'compras';
+  $('carga-titulo').textContent = esCompras ? 'Nuevo comprobante' : 'Avance del día';
+  $('caja-tipo').classList.toggle('oculto', !esCompras);
+  $('btn-pdf').classList.toggle('oculto', !esCompras);
+  $('btn-video').classList.toggle('oculto', esCompras);
+  if (esCompras) pintarTipos();
+  pintarGrilla();
+  mostrar('carga');
+}
+
+const TIPOS = [
+  { id:'factura',  txt:'Factura'   },
+  { id:'pago',     txt:'Pago'      },
+  { id:'remision', txt:'Remisión'  },
+  { id:'otro',     txt:'Otro'      }
+];
+function pintarTipos(){
+  $('tipos').innerHTML = TIPOS.map(t =>
+    '<button class="' + (TIPO===t.id?'on':'') + '" onclick="TIPO=\'' + t.id + '\';pintarTipos()">' + t.txt + '</button>'
+  ).join('');
+}
+
+// ── Adjuntos ──────────────────────────────────────────────────────
+function agregar(input, tipo){
+  const files = Array.from(input.files||[]);
+  input.value = '';
+  if (!files.length) return;
+  const err = $('carga-error'); err.classList.add('oculto');
+
+  files.forEach(f => {
+    if (tipo === 'vid'){
+      if (f.size > VIDEO_MAX_MB * 1048576){
+        err.textContent = 'El video pesa más de ' + VIDEO_MAX_MB + ' MB. Grabá uno más corto.';
+        err.classList.remove('oculto');
+        return;
+      }
+      // Un solo video por carga
+      adjuntos = adjuntos.filter(a => a.tipo !== 'vid');
+    }
+    adjuntos.push({ file:f, tipo:tipo, url: tipo==='pdf' ? null : URL.createObjectURL(f) });
+  });
+  pintarGrilla();
+}
+
+function quitar(i){
+  const a = adjuntos[i];
+  if (a && a.url) { try{ URL.revokeObjectURL(a.url); }catch(e){} }
+  adjuntos.splice(i,1);
+  pintarGrilla();
+}
+
+function pintarGrilla(){
+  $('grilla').innerHTML = adjuntos.map((a,i) => {
+    const cuerpo =
+      a.tipo === 'vid' ? '<video src="'+a.url+'" muted preload="metadata"></video>' :
+      a.tipo === 'pdf' ? '<div class="pdf"><span style="font-size:22px">📄</span>PDF</div>' :
+                         '<img src="'+a.url+'">';
+    return '<div class="mini">' + cuerpo +
+           '<button class="x" onclick="quitar('+i+')" aria-label="Quitar">✕</button></div>';
+  }).join('');
+}
+
+// ── Comprimir antes de subir ──────────────────────────────────────
+// Una foto de celular pesa 4 o 5 MB. Sin achicarla, en una obra con señal
+// floja la carga no termina nunca. 1600px alcanza de sobra para leer una
+// factura y para ver un detalle constructivo.
+function comprimir(file){
+  return new Promise(resolve => {
+    if (!/^image\//.test(file.type)) { resolve(file); return; }
+    const lector = new FileReader();
+    lector.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        let { width:w, height:h } = img;
+        if (w > FOTO_MAX_PX || h > FOTO_MAX_PX){
+          const r = Math.min(FOTO_MAX_PX/w, FOTO_MAX_PX/h);
+          w = Math.round(w*r); h = Math.round(h*r);
+        }
+        const cv = document.createElement('canvas');
+        cv.width = w; cv.height = h;
+        cv.getContext('2d').drawImage(img, 0, 0, w, h);
+        cv.toBlob(b => resolve(b || file), 'image/jpeg', 0.72);
+      };
+      img.onerror = () => resolve(file);
+      img.src = e.target.result;
+    };
+    lector.onerror = () => resolve(file);
+    lector.readAsDataURL(file);
+  });
+}
+
+function slugObra(nombre){
+  return String(nombre||'obra').replace(/[^a-zA-Z0-9]/g,'_').slice(0,60);
+}
+
+// ── Enviar ────────────────────────────────────────────────────────
+async function enviar(){
+  const err = $('carga-error'); err.classList.add('oculto');
+  const fecha = $('fecha').value;
+  const comentario = ($('comentario').value||'').trim();
+
+  if (!adjuntos.length && !comentario){
+    err.textContent = 'Poné al menos una foto o un comentario.';
+    err.classList.remove('oculto'); return;
+  }
+  if (!navigator.onLine){
+    err.textContent = 'No hay señal. Tus fotos siguen acá — probá de nuevo cuando vuelva.';
+    err.classList.remove('oculto'); return;
+  }
+
+  const btn = $('btn-enviar');
+  btn.disabled = true; btn.textContent = 'Enviando…';
+  $('progreso').classList.remove('oculto');
+  const barra = $('barra-pct'), estado = $('estado-txt');
+
+  const carpeta = (SECCION === 'compras' ? 'comprobantes/' : '') + slugObra(OBRA);
+  const subidos = [];
+  let fallos = 0;
+
+  for (let i = 0; i < adjuntos.length; i++){
+    const a = adjuntos[i];
+    estado.textContent = 'Subiendo ' + (i+1) + ' de ' + adjuntos.length + '…';
+    barra.style.width = Math.round((i/adjuntos.length)*100) + '%';
+    try{
+      const blob = a.tipo === 'img' ? await comprimir(a.file) : a.file;
+      const ext  = a.tipo === 'img' ? 'jpg'
+                 : a.tipo === 'pdf' ? 'pdf'
+                 : ((a.file.name||'v.mp4').split('.').pop() || 'mp4');
+      const path = carpeta + '/app_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) + '.' + ext;
+      const { error } = await supa.storage.from(BUCKET).upload(path, blob, {
+        contentType: blob.type || (a.tipo==='vid' ? 'video/mp4' : a.tipo==='pdf' ? 'application/pdf' : 'image/jpeg'),
+        upsert: false
+      });
+      if (error) throw error;
+      const { data } = supa.storage.from(BUCKET).getPublicUrl(path);
+      subidos.push({ u:data.publicUrl, p:path, s:blob.size, t:a.tipo });
+    }catch(e){ fallos++; console.warn('[subida]', e); }
+  }
+
+  barra.style.width = '100%';
+  estado.textContent = 'Guardando…';
+
+  try{
+    if (SECCION === 'compras'){
+      const { error } = await supa.from('axo_comprobantes').insert({
+        obra: OBRA, tipo: TIPO, fecha: fecha || null,
+        comentario: comentario, archivos: subidos,
+        autor: USUARIO, origen: 'app'
+      });
+      if (error) throw error;
+    } else {
+      const { error } = await supa.from('axo_libro_bot').insert({
+        obra: OBRA, fecha: fecha || null, texto: comentario,
+        archivos: subidos, origen: 'link', autor: USUARIO || 'Obra', estado: 'pendiente'
+      });
+      if (error) throw error;
+    }
+  }catch(e){
+    btn.disabled = false; btn.textContent = 'Enviar';
+    $('progreso').classList.add('oculto');
+    err.textContent = 'No se pudo guardar: ' + (e.message||'error') + '. Tus fotos siguen acá, probá de nuevo.';
+    err.classList.remove('oculto');
+    return;
+  }
+
+  adjuntos.forEach(a => { if (a.url) { try{ URL.revokeObjectURL(a.url); }catch(e){} } });
+  adjuntos = [];
+  btn.disabled = false; btn.textContent = 'Enviar';
+  $('progreso').classList.add('oculto');
+  $('listo-detalle').innerHTML =
+    subidos.length + ' archivo(s) enviados' + (fallos ? ' — ' + fallos + ' fallaron, mandalos de nuevo' : '') +
+    '.<br>' + (SECCION === 'compras'
+      ? 'Ya aparece en Compras → Comprobantes.'
+      : 'Queda esperando revisión en el Libro de Obra.');
+  mostrar('listo');
+}
+
+function otraCarga(){ elegirObra(OBRA); }
+
+// ── Instalación ───────────────────────────────────────────────────
+function yaInstalada(){
+  return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true;
+}
+let _prompt = null;
+window.addEventListener('beforeinstallprompt', ev => {
+  ev.preventDefault(); _prompt = ev;
+  $('btn-instalar').classList.remove('oculto');
+  $('instalar-texto').textContent = 'Tocá Instalar y queda como una aplicación más del teléfono.';
+});
+async function instalar(){
+  if (!_prompt) return;
+  _prompt.prompt();
+  try{ await _prompt.userChoice; }catch(e){}
+  _prompt = null;
+  $('btn-instalar').classList.add('oculto');
+}
+window.addEventListener('appinstalled', () => $('caja-instalar').classList.add('oculto'));
+
+// Si Chrome no ofrece el botón (pasa según versión y cuánto usaste la
+// página), se explica el camino a mano. Nadie parado en una obra puede
+// depender de que el navegador se acuerde de ofrecerlo.
+setTimeout(() => {
+  if (_prompt || yaInstalada()) return;
+  const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  $('instalar-texto').innerHTML = esIOS
+    ? 'En iPhone: tocá <b>Compartir</b> abajo y después <b>Agregar a inicio</b>.'
+    : 'Si no aparece el botón: menú <b>⋮</b> del navegador → <b>Instalar aplicación</b> (o <b>Agregar a pantalla principal</b>).';
+}, 2500);
+
+// ── Service worker ────────────────────────────────────────────────
+if ('serviceWorker' in navigator){
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(e => console.warn('sw', e));
+  });
+}
+
+// ── Arranque ──────────────────────────────────────────────────────
+(async function(){
+  $('fecha').value = new Date().toISOString().split('T')[0];
+  if (!supa){ mostrar('login'); return; }
+  try{
+    const { data } = await supa.auth.getSession();
+    if (data && data.session){
+      USUARIO = data.session.user ? data.session.user.email : '';
+      arrancar();
+      return;
+    }
+  }catch(e){}
+  mostrar('login');
+})();
+</script>
+</body>
+</html>
