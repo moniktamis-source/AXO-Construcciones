@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-guardado</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-libro</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -2073,7 +2073,7 @@ function guardarClientes(obj){
     if (typeof subirNube==='function') subirNube('axo_clientes');
     refrescarDatalistsCP();
     registrarActividad('Actualizado: Clientes', '');
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
     return true;
   }catch(e){ alert('No se pudo guardar: '+e.message); return false; }
 }
@@ -2084,7 +2084,7 @@ function guardarProveedores(obj){
     if (typeof subirNube==='function') subirNube('axo_proveedores');
     refrescarDatalistsCP();
     registrarActividad('Actualizado: Proveedores', '');
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
     return true;
   }catch(e){ alert('No se pudo guardar: '+e.message); return false; }
 }
@@ -2557,7 +2557,7 @@ function guardarCRM(obj){
     localStorage.setItem('axo_crm', JSON.stringify(obj));
     if (typeof subirNube==='function') subirNube('axo_crm');
     registrarActividad('Actualizado: CRM', '');
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
     return true;
   }catch(e){ alert('No se pudo guardar: '+e.message); return false; }
 }
@@ -2820,7 +2820,7 @@ function guardarPlannerEventos(arr){
   try{
     localStorage.setItem('axo_crm_planner', JSON.stringify(arr));
     registrarActividad('Actualizado: Planner', '');
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
     return true;
   }catch(e){ alert('No se pudo guardar el Planner: '+e.message); return false; }
 }
@@ -3345,6 +3345,139 @@ function axoFusionarActividad(listaA, listaB){
   });
   return out.slice(0, 300);
 }
+// ═══════════════════════════════════════════════════════════════════════
+// LIBRO DE OBRA: FUSION POR ENTRADA  (06/08/2026)
+//
+// El Libro viajaba como un bloque entero: todas las entradas, todas las
+// semanas, todo junto en un solo paquete. El ultimo que guardaba pisaba al
+// anterior. Y es JUSTO el modulo donde dos personas trabajan a la vez —la
+// persona de obra cargando el dia desde la obra, la administracion desde la
+// oficina— asi que era el mas expuesto de todos.
+//
+// Ahora se fusiona igual que la Bitacora y el Banco: entrada por entrada.
+//   · Cada entrada lleva 'mod', la hora de su ultima edicion. Si las dos
+//     partes tocaron la MISMA entrada, queda la que se edito ultima.
+//   · Borrar deja una lapida en '_bajas'. Sin eso, la entrada que uno borra
+//     se la vuelve a traer el otro en la siguiente sincronizacion.
+//   · Si alguien edita una entrada DESPUES de que la borraron, la edicion
+//     gana y la entrada vuelve: se pierde menos trabajo asi.
+// ═══════════════════════════════════════════════════════════════════════
+const AXO_LIBRO_LISTAS = ['entradas','semanas'];
+const AXO_LIBRO_MAX_BAJAS = 200;
+
+function axoEsClaveLibro(clave){ return String(clave||'').indexOf('axo_libro_') === 0; }
+function axoSinMod(it){
+  const c = {};
+  Object.keys(it).forEach(function(k){ if(k !== 'mod') c[k] = it[k]; });
+  return c;
+}
+function axoFechaItemLibro(it){ return String((it && (it.fecha || it.desde)) || ''); }
+
+// Marca lo que cambio respecto de lo que ya estaba guardado, y anota las bajas.
+// Se hace en un solo lugar (saveLibro) para no tener que tocar las veinte
+// funciones que modifican el Libro y arriesgar que alguna quede sin marcar.
+function axoSellarCambiosLibro(nuevo, viejo){
+  if(!nuevo || typeof nuevo !== 'object') return nuevo;
+  const ahora = new Date().toISOString();
+  const bajas = Array.isArray(nuevo._bajas) ? nuevo._bajas.slice() : [];
+  AXO_LIBRO_LISTAS.forEach(function(lista){
+    const nl = Array.isArray(nuevo[lista]) ? nuevo[lista] : [];
+    const vl = Array.isArray(viejo && viejo[lista]) ? viejo[lista] : [];
+    const antes = {};
+    vl.forEach(function(it){ if(it && it.id) antes[it.id] = JSON.stringify(axoSinMod(it)); });
+    nl.forEach(function(it){
+      if(!it || !it.id) return;
+      const firma = JSON.stringify(axoSinMod(it));
+      if(antes[it.id] === undefined || antes[it.id] !== firma) it.mod = ahora;
+      delete antes[it.id];
+    });
+    Object.keys(antes).forEach(function(id){ bajas.push({ id:id, lista:lista, mod:ahora }); });
+  });
+  if(bajas.length){
+    const porId = {};
+    bajas.forEach(function(b){
+      const k = (b.lista||'entradas') + '|' + b.id;
+      if(!porId[k] || String(b.mod) > String(porId[k].mod)) porId[k] = b;
+    });
+    nuevo._bajas = Object.keys(porId).map(function(k){ return porId[k]; })
+      .sort(function(a,b){ return String(b.mod).localeCompare(String(a.mod)); })
+      .slice(0, AXO_LIBRO_MAX_BAJAS);
+  }
+  return nuevo;
+}
+
+function axoFusionarLibro(local, nube){
+  const L = (local && typeof local === 'object' && !Array.isArray(local)) ? local : {};
+  const N = (nube  && typeof nube  === 'object' && !Array.isArray(nube))  ? nube  : {};
+  const out = {};
+  // Campos sueltos del Libro: mandan los de este equipo, y lo que falte se
+  // completa con lo de la nube.
+  Object.keys(N).forEach(function(k){ if(AXO_LIBRO_LISTAS.indexOf(k)===-1 && k!=='_bajas') out[k]=N[k]; });
+  Object.keys(L).forEach(function(k){ if(AXO_LIBRO_LISTAS.indexOf(k)===-1 && k!=='_bajas') out[k]=L[k]; });
+
+  const bajas = {};
+  [].concat(Array.isArray(L._bajas)?L._bajas:[], Array.isArray(N._bajas)?N._bajas:[]).forEach(function(b){
+    if(!b || !b.id) return;
+    const k = (b.lista||'entradas') + '|' + b.id;
+    if(!bajas[k] || String(b.mod) > String(bajas[k].mod)) bajas[k] = b;
+  });
+
+  AXO_LIBRO_LISTAS.forEach(function(lista){
+    const porId = {};
+    const meter = function(it){
+      if(!it || !it.id) return;
+      const ya = porId[it.id];
+      if(!ya){ porId[it.id] = it; return; }
+      if(String(it.mod||'') > String(ya.mod||'')) porId[it.id] = it;   // gana la edicion mas reciente
+    };
+    (Array.isArray(L[lista]) ? L[lista] : []).forEach(meter);
+    (Array.isArray(N[lista]) ? N[lista] : []).forEach(meter);
+    const res = [];
+    Object.keys(porId).forEach(function(id){
+      const lapida = bajas[lista + '|' + id];
+      if(lapida && String(lapida.mod) >= String(porId[id].mod || '')) return;   // se borro despues de la ultima edicion
+      res.push(porId[id]);
+    });
+    res.sort(function(a,b){
+      const fa = axoFechaItemLibro(a), fb = axoFechaItemLibro(b);
+      if(fa !== fb) return fb.localeCompare(fa);
+      return String(b.creado||b.id||'').localeCompare(String(a.creado||a.id||''));
+    });
+    out[lista] = res;
+  });
+
+  const lista = Object.keys(bajas).map(function(k){ return bajas[k]; })
+    .sort(function(a,b){ return String(b.mod).localeCompare(String(a.mod)); })
+    .slice(0, AXO_LIBRO_MAX_BAJAS);
+  if(lista.length) out._bajas = lista;
+  return out;
+}
+
+// Sube la union de lo local y lo que ya hay en la nube. Nunca reemplaza.
+async function axoSubirLibro(clave){
+  try{
+    let local = {};
+    try{ local = JSON.parse(localStorage.getItem(clave)||'{}'); }catch(e){ local = {}; }
+    let remoto = {};
+    try{
+      const { data, error } = await supa.from('axo_datos').select('valor').eq('clave', clave);
+      if(!error && data && data.length && data[0].valor && typeof data[0].valor === 'object') remoto = data[0].valor;
+    }catch(e){ /* si no se pudo leer, se sube al menos lo local */ }
+    const fus = axoFusionarLibro(local, remoto);
+    const { error } = await supa.from('axo_datos').upsert({ clave:clave, valor:fus, actualizado:new Date().toISOString() });
+    if(error){ console.warn('subirNube libro', clave, error); return false; }
+    try{
+      const txt = JSON.stringify(fus);
+      if(localStorage.getItem(clave) !== txt){
+        (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))(clave, txt);
+        if(typeof renderLibroObra === 'function' && document.getElementById('tab-libroobra') &&
+           document.getElementById('tab-libroobra').classList.contains('active')) renderLibroObra();
+      }
+    }catch(e){}
+    return true;
+  }catch(e){ console.warn('subirNube libro', clave, e); return false; }
+}
+
 // Sube la UNION de la historia local y la de la nube. Nunca reemplaza.
 async function axoSubirActividad(){
   try{
@@ -4107,6 +4240,8 @@ async function subirNube(clave){
   if(!supa) return false;
   // Los modulos migrados ya no viajan como bloque: van registro por registro.
   if(axoEsModuloRegistro(clave)) return await axoSubirRegistros(clave);
+  // El Libro de Obra sube fusionado entrada por entrada, nunca lo pisa.
+  if(axoEsClaveLibro(clave)) return await axoSubirLibro(clave);
   // La bitacora sube como union con lo que ya hay en la nube, nunca la pisa.
   if(clave === 'axo_actividad') return await axoSubirActividad();
   // El Banco sube fusionado item por item contra la nube, nunca la pisa.
@@ -4400,6 +4535,22 @@ async function sincronizarDesdeNube(opts){
     data.forEach(row=>{
       if (axoEsModuloRegistro(row.clave)) return; // ya se fusiono arriba, no lo pisamos con el bloque viejo
       if (window.__axoClavesEnVuelo && window.__axoClavesEnVuelo.has(row.clave)) return; // hay un cambio local subiendo todavia
+      // El Libro de Obra se fusiona entrada por entrada, nunca se reemplaza.
+      if (axoEsClaveLibro(row.clave)){
+        try{
+          let local = {};
+          try{ local = JSON.parse(localStorage.getItem(row.clave)||'{}'); }catch(e2){ local = {}; }
+          const txt = JSON.stringify(axoFusionarLibro(local, row.valor));
+          if(localStorage.getItem(row.clave) !== txt){
+            (window.__axoSetItemDirecto || localStorage.setItem.bind(localStorage))(row.clave, txt);
+            cambiadas++;
+          }
+        }catch(e2){
+          sinEspacio.push(row.clave);
+          console.warn('[sync] no entro el Libro de Obra en este dispositivo:', row.clave, e2 && e2.name);
+        }
+        return;
+      }
       // El historial de Deshacer tampoco se pisa: se une con el local.
       if (row.clave === 'axo_proyectos_backup'){
         try{
@@ -5846,7 +5997,7 @@ let especificaciones = (function(){
   if (limpiados) console.log('[Especificaciones] textos internos limpiados: ' + limpiados);
   return base;
 })();
-function guardarEspecificaciones(){ try { localStorage.setItem('axo_especificaciones', JSON.stringify(especificaciones)); if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓'); } catch(e){ alert('No se pudo guardar (¿espacio lleno por fotos/PDF muy grandes?).'); } }
+function guardarEspecificaciones(){ try { localStorage.setItem('axo_especificaciones', JSON.stringify(especificaciones)); if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado'); } catch(e){ alert('No se pudo guardar (¿espacio lleno por fotos/PDF muy grandes?).'); } }
 let vistaOferta = false;
 let cronograma = {}; // cod -> { inicioDia, duracionDias }
 let cronogramaRealAdic = {}; // ad.id real
@@ -12118,7 +12269,7 @@ function renderDashGlobal() {
 let gabineteActivo = null; // id del trabajo abierto
 
 function getGabinetes(){ try{ return JSON.parse(localStorage.getItem('axo_gabinete')||'{}'); }catch(e){ return {}; } }
-function saveGabinetes(o){ localStorage.setItem('axo_gabinete', JSON.stringify(o)); registrarActividad('Actualizado: Gabinetes', ''); if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓'); }
+function saveGabinetes(o){ localStorage.setItem('axo_gabinete', JSON.stringify(o)); registrarActividad('Actualizado: Gabinetes', ''); if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado'); }
 
 function nuevoGabinete(){
   const obj = getGabinetes();
@@ -12395,7 +12546,7 @@ function getRelevamientos(){ try{ return JSON.parse(localStorage.getItem('axo_re
 function saveRelevamientos(o){
   try{
     localStorage.setItem('axo_relevamientos', JSON.stringify(o));
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
   }
   catch(e){ alert('No hay más espacio para guardar imágenes en este dispositivo. Exportá un respaldo o borrá algunas fotos.'); }
 }
@@ -13059,8 +13210,14 @@ function libroKey(){
 function getLibro(){ try{ return JSON.parse(localStorage.getItem(libroKey())||'{"entradas":[]}'); }catch(e){ return {entradas:[]}; } }
 function saveLibro(o){
   try{
-    localStorage.setItem(libroKey(), JSON.stringify(o));
-    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado ✓');
+    const k = libroKey();
+    // Antes de guardar se marca QUE cambio y QUE se borro. Es lo que despues
+    // le permite a la fusion decidir sin pisar el trabajo de la otra persona.
+    let previo = {};
+    try{ previo = JSON.parse(localStorage.getItem(k)||'{}'); }catch(e2){ previo = {}; }
+    try{ axoSellarCambiosLibro(o, previo); }catch(e2){ console.warn('[Libro] no se pudo sellar', e2); }
+    localStorage.setItem(k, JSON.stringify(o));
+    if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
   }
   catch(e){ alert('No hay más espacio para guardar imágenes en este dispositivo. Exportá un respaldo o borrá algunas fotos.'); }
 }
