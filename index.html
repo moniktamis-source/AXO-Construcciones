@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-libro</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.06-app</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -1681,6 +1681,7 @@
             <option value="materiales">📦 Compras de materiales</option>
             <option value="listacompra">🛒 Lista de compra (qué pedir)</option>
             <option value="certificacion">✅ Certificación MO / subcontratos</option>
+            <option value="comprobantes">📎 Comprobantes (facturas, pagos, remisiones)</option>
           </select>
         </div>
         <div class="form-group" style="margin:0">
@@ -9817,6 +9818,10 @@ function renderComprasCompleto() {
     if (ayuda) ayuda.innerHTML = '🛒 Lo que te falta comprar, ya convertido a <strong>unidades de compra</strong> (bolsas, tumbas, etc.). Descuenta lo que ya registraste como comprado y redondea para arriba, porque nadie te vende media bolsa. Ajustá la presentación de cada material y el % de desperdicio según tu criterio.';
     if (botones) botones.innerHTML = `<button class="btn btn-outline btn-sm" onclick="imprimirListaCompra()">🖨️ Imprimir lista</button>`;
     renderListaCompra();
+  } else if (seccion === 'comprobantes') {
+    if (ayuda) ayuda.innerHTML = '📎 Facturas, pagos y remisiones de esta obra. Se cargan desde el celular con la app <strong>AXO Obra</strong> (Compras) y aparecen acá solos. También podés agregarlos desde esta pantalla. Van sueltos por obra, no colgados de cada material: una factura de corralón suele cubrir varios a la vez.';
+    if (botones) botones.innerHTML = `<button class="btn btn-outline btn-sm" onclick="cargarComprobantes()">🔄 Buscar nuevos</button>`;
+    renderComprobantes();
   } else {
     if (ayuda) ayuda.innerHTML = '✅ Toda la MO y subcontratos cargados en el Costeo (con o sin Adjudicados) y adicionales. Registrá cada contratación/avance como un <strong>lote</strong> (cantidad + precio + proveedor) — no hace falta adjudicar antes. Retención y certificado abajo.';
     if (botones) botones.innerHTML = `
@@ -9824,6 +9829,159 @@ function renderComprasCompleto() {
       <button class="btn btn-outline btn-sm" onclick="pdfCertificacion('sub')">📄 PDF Certif. Subcontratos</button>`;
     renderCertificacion();
   }
+}
+
+// ═══════════════════════════════════════════════════════════════════════
+// COMPROBANTES DE COMPRAS  (06/08/2026)
+//
+// Facturas, pagos y remisiones de la obra. Se sacan con el celular desde la
+// app AXO Obra y caen en la tabla axo_comprobantes: una fila por documento.
+//
+// Por que NO viven adentro del proyecto: si fueran parte de la obra, el
+// celular tendria que bajarse la obra entera, modificarla y volver a subirla,
+// y ahi reaparecen los choques entre dispositivos. Una fila suelta se inserta
+// sola y no pisa nada de nadie.
+//
+// Y por que entran DIRECTO, sin revision, a diferencia del Libro de Obra: una
+// entrada del Libro puede terminar en el informe del cliente, un comprobante
+// no. Es respaldo interno. Pedir que se apruebe cada factura seria friccion
+// sin sentido.
+// ═══════════════════════════════════════════════════════════════════════
+let _comprobantes = [];
+let _comprobantesObra = null;
+
+const COMP_TIPOS = { factura:'🧾 Factura', pago:'💵 Pago', remision:'🚚 Remisión', otro:'📎 Otro' };
+
+async function cargarComprobantes(silencioso){
+  const obra = (typeof claveObraActual === 'function') ? claveObraActual() : '';
+  _comprobantesObra = obra;
+  if (!obra || typeof supa === 'undefined' || !supa){ _comprobantes = []; if(!silencioso) renderComprobantes(); return; }
+  try{
+    const { data, error } = await supa.from('axo_comprobantes')
+      .select('*').eq('obra', obra).eq('borrado', false)
+      .order('fecha', { ascending:false }).order('creado', { ascending:false });
+    if (error) throw error;
+    _comprobantes = data || [];
+  }catch(e){
+    console.warn('[Comprobantes] no se pudieron leer:', e && e.message);
+    _comprobantes = [];
+  }
+  if (!silencioso) renderComprobantes();
+}
+
+function renderComprobantes(){
+  const cont = document.getElementById('compras-container');
+  if (!cont) return;
+  const obra = (typeof claveObraActual === 'function') ? claveObraActual() : '';
+  if (!obra){
+    cont.innerHTML = '<div class="card"><div class="card-body"><div class="alert alert-warn">Primero elegí una obra: hacen falta el cliente y el proyecto para saber de qué obra son los comprobantes.</div></div></div>';
+    return;
+  }
+  // Si todavia no se leyo esta obra, se lee y esta misma funcion se vuelve a llamar
+  if (_comprobantesObra !== obra){
+    cont.innerHTML = '<div class="card"><div class="card-body" style="color:#999;padding:18px;text-align:center">Buscando comprobantes…</div></div>';
+    cargarComprobantes();
+    return;
+  }
+
+  const porTipo = {};
+  _comprobantes.forEach(c => { porTipo[c.tipo] = (porTipo[c.tipo]||0) + 1; });
+  const resumen = Object.keys(COMP_TIPOS)
+    .filter(t => porTipo[t])
+    .map(t => COMP_TIPOS[t] + ' ' + porTipo[t]).join(' · ');
+
+  let html = `<div class="card"><div class="card-body" style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <label class="btn btn-primary btn-sm" style="cursor:pointer">📎 Agregar comprobante
+        <input type="file" accept="image/*,application/pdf" multiple style="display:none" onchange="subirComprobanteDesdeSistema(this)">
+      </label>
+      <select id="comp-tipo-nuevo" class="form-input" style="width:auto;padding:6px 10px;font-size:13px">
+        ${Object.keys(COMP_TIPOS).map(t => '<option value="'+t+'">'+COMP_TIPOS[t]+'</option>').join('')}
+      </select>
+      <span style="font-size:12px;color:#666">${resumen || 'Sin comprobantes todavía'}</span>
+    </div></div>`;
+
+  if (!_comprobantes.length){
+    html += `<div class="card"><div class="card-body"><div style="color:#999;text-align:center;padding:26px">
+      Sin comprobantes en esta obra.<br>
+      <span style="font-size:12px">Se cargan desde el celular con la app <strong>AXO Obra</strong> → Compras, o con el botón de arriba.</span>
+    </div></div></div>`;
+    cont.innerHTML = html;
+    return;
+  }
+
+  _comprobantes.forEach(c => {
+    const archivos = Array.isArray(c.archivos) ? c.archivos : [];
+    const minis = archivos.map(a => {
+      if (!a || !a.u) return '';
+      if (a.t === 'pdf') return `<a href="${a.u}" target="_blank" rel="noopener" style="width:78px;height:78px;border:1px solid #ddd;border-radius:6px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font-size:11px;color:#666;text-decoration:none;background:#fff">📄<span>PDF</span></a>`;
+      return `<a href="${a.u}" target="_blank" rel="noopener"><img src="${a.u}" style="width:78px;height:78px;object-fit:cover;border-radius:6px;display:block;border:1px solid #ddd"></a>`;
+    }).join('');
+    const f = c.fecha ? new Date(c.fecha+'T00:00:00').toLocaleDateString('es-PY',{day:'2-digit',month:'2-digit',year:'2-digit'}) : 'sin fecha';
+    html += `<div class="card"><div class="card-body" style="padding:13px 15px">
+      <div style="display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:${(c.comentario||archivos.length)?'9px':'0'}">
+        <span style="font-size:12px;font-weight:700;color:#4A6741">${COMP_TIPOS[c.tipo]||c.tipo}</span>
+        <strong style="font-size:13px">${f}</strong>
+        <span style="font-size:11px;color:#999">${archivos.length} archivo(s)${c.autor ? ' · '+nombreCortoUsuario(c.autor) : ''}${c.origen==='app'?' · 📱 celular':''}</span>
+        <button onclick="borrarComprobante(${c.id})" style="margin-left:auto;border:none;background:#fee;color:#C00;border-radius:4px;cursor:pointer;padding:4px 10px;font-size:11px">🗑 Quitar</button>
+      </div>
+      ${c.comentario ? `<div style="font-size:12.5px;color:#555;margin-bottom:9px;line-height:1.45">${String(c.comentario).replace(/</g,'&lt;')}</div>` : ''}
+      <div style="display:flex;gap:7px;flex-wrap:wrap">${minis}</div>
+    </div></div>`;
+  });
+  cont.innerHTML = html;
+}
+
+async function borrarComprobante(id){
+  if (!confirm('¿Quitar este comprobante de la lista?\n\nNo se borra de verdad: queda dado de baja y se puede recuperar desde Supabase si hizo falta.')) return;
+  try{
+    const { error } = await supa.from('axo_comprobantes').update({ borrado:true }).eq('id', id);
+    if (error) throw error;
+    _comprobantes = _comprobantes.filter(c => c.id !== id);
+    renderComprobantes();
+    registrarActividad('Comprobante dado de baja', claveObraActual());
+    if (typeof mostrarToastGuardado === 'function') mostrarToastGuardado('Comprobante quitado');
+  }catch(e){
+    alert('No se pudo quitar: ' + (e.message||e));
+  }
+}
+
+// Subida desde la computadora. La app del celular hace lo mismo contra la
+// misma tabla, asi que lo que se carga de un lado aparece del otro.
+async function subirComprobanteDesdeSistema(input){
+  const files = Array.from(input.files||[]);
+  input.value = '';
+  if (!files.length) return;
+  const obra = claveObraActual();
+  if (!obra){ alert('Primero elegí la obra.'); return; }
+  if (!supa){ alert('No hay conexión con la nube.'); return; }
+  const tipo = document.getElementById('comp-tipo-nuevo')?.value || 'factura';
+  const comentario = prompt('Comentario para este comprobante (opcional):', '') || '';
+  const carpeta = 'comprobantes/' + String(obra).replace(/[^a-zA-Z0-9]/g,'_').slice(0,60);
+  const subidos = [];
+  for (const f of files){
+    try{
+      const esPdf = /pdf$/i.test(f.type) || /\.pdf$/i.test(f.name);
+      const blob = esPdf ? f : await new Promise(res => comprimirImagen(f, d => res(dataURLaBlob(d))));
+      const path = carpeta + '/sis_' + Date.now() + '_' + Math.random().toString(36).slice(2,7) + '.' + (esPdf?'pdf':'jpg');
+      const { error } = await supa.storage.from(LIBRO_BUCKET).upload(path, blob, {
+        contentType: esPdf ? 'application/pdf' : 'image/jpeg', upsert:false });
+      if (error) throw error;
+      const { data } = supa.storage.from(LIBRO_BUCKET).getPublicUrl(path);
+      subidos.push({ u:data.publicUrl, p:path, s:blob.size, t: esPdf?'pdf':'img' });
+    }catch(e){ console.warn('[Comprobantes] no se pudo subir', f.name, e); }
+  }
+  if (!subidos.length){ alert('No se pudo subir ningún archivo. Revisá la conexión y los permisos del bucket.'); return; }
+  try{
+    const { error } = await supa.from('axo_comprobantes').insert({
+      obra: obra, tipo: tipo, fecha: new Date().toISOString().split('T')[0],
+      comentario: comentario, archivos: subidos,
+      autor: usuarioActual(), origen: 'sistema'
+    });
+    if (error) throw error;
+    registrarActividad('Comprobante cargado', obra);
+    await cargarComprobantes();
+    if (typeof mostrarToastGuardado === 'function') mostrarToastGuardado(subidos.length + ' archivo(s) cargados');
+  }catch(e){ alert('Se subieron los archivos pero no se pudo guardar el comprobante: ' + (e.message||e)); }
 }
 
 function renderListaNecesidades() {
