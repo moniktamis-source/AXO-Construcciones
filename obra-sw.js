@@ -1,19 +1,27 @@
-// ═══════════════════════════════════════════════════════════
-// AXO — Service worker mínimo de obra.html
+// ═══════════════════════════════════════════════════════════════════
+// AXO — service worker VIEJO de la raíz. Ya no se usa.
 //
-// Existe por un solo motivo: Chrome exige un service worker con
-// manejador de fetch para ofrecer "Instalar aplicación". Sin esto,
-// el ícono en la pantalla de inicio queda como un acceso directo
-// común, sin nombre propio de la obra.
+// La app de obra se mudó a /obra/, con su propio service worker de
+// alcance limitado a esa carpeta. Este archivo queda solo para
+// desinstalarse a sí mismo en los teléfonos que ya lo tenían
+// registrado: si no, seguiría controlando la raíz del sitio (incluido
+// index.html) para siempre, porque un service worker registrado no se
+// va aunque borres el archivo del repositorio.
 //
-// A PROPÓSITO NO CACHEA NADA. Deja pasar todo a la red tal cual.
-// Si cacheara, el residente podría quedarse con una versión vieja
-// de la página después de que actualicemos el sistema — y ese
-// problema es mucho peor que el que vendríamos a resolver.
-// ═══════════════════════════════════════════════════════════
+// Se puede eliminar dentro de unos meses, cuando todos los equipos
+// hayan abierto el sitio al menos una vez.
+// ═══════════════════════════════════════════════════════════════════
 
 self.addEventListener('install', () => self.skipWaiting());
-self.addEventListener('activate', (e) => e.waitUntil(self.clients.claim()));
 
-// Passthrough puro: sin caché, sin intercepción real.
-self.addEventListener('fetch', () => { /* la red se encarga */ });
+self.addEventListener('activate', (e) => {
+  e.waitUntil((async () => {
+    try {
+      const claves = await caches.keys();
+      await Promise.all(claves.map(k => caches.delete(k)));
+    } catch (err) { /* si no se puede limpiar, igual nos vamos */ }
+    await self.registration.unregister();
+    const clientes = await self.clients.matchAll({ type: 'window' });
+    clientes.forEach(c => c.navigate(c.url));
+  })());
+});
