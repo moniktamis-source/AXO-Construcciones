@@ -1907,8 +1907,18 @@ function renderVistaCliente(cont, d){
       const fechaTxt = av.fecha ? new Date(av.fecha+'T00:00:00').toLocaleDateString('es-PY',{day:'2-digit',month:'long',year:'numeric'}) : '';
       let fotosBloque = '';
       (av.fotos||[]).forEach(f=>{
+        // 08/08/2026: los videos que se suben desde el Libro de Obra viajan en
+        // la MISMA lista que las fotos, marcados con vid:true. El visor los
+        // dibujaba a todos como <img>, asi que el video quedaba invisible: el
+        // cliente veia solo las fotos y ningun aviso de que faltaba algo.
+        // El chequeo por extension es para los informes ya publicados antes de
+        // hoy, cuyos datos guardados no tienen la marca vid.
+        const esVid = f.vid || /\.(mp4|mov|webm|m4v|avi)(\?|$)/i.test(f.img||'');
+        const media = esVid
+          ? `<video src="${f.img}" controls playsinline preload="metadata" style="width:100%;display:block;background:#000"></video>`
+          : `<img src="${f.img}" style="width:100%;display:block">`;
         fotosBloque += `<div style="border-radius:10px;overflow:hidden;margin-bottom:10px">
-          <img src="${f.img}" style="width:100%;display:block">
+          ${media}
           ${f.pie?`<div style="color:#444;padding:8px 10px;line-height:1.4;font-size:14px;background:#faf9f7">${(f.pie||'').replace(/</g,'&lt;')}</div>`:''}
         </div>`;
       });
@@ -1929,8 +1939,11 @@ function renderVistaCliente(cont, d){
       </div>`;
     }
     (d.fotos||[]).forEach(f=>{
+      const esVid = f.vid || /\.(mp4|mov|webm|m4v|avi)(\?|$)/i.test(f.img||'');
       avancesHtml += `<div style="background:#fff;border-radius:14px;overflow:hidden;margin-bottom:16px;box-shadow:0 2px 10px rgba(0,0,0,0.05)">
-        <img src="${f.img}" style="width:100%;display:block">
+        ${esVid
+          ? `<video src="${f.img}" controls playsinline preload="metadata" style="width:100%;display:block;background:#000"></video>`
+          : `<img src="${f.img}" style="width:100%;display:block">`}
         <div style="padding:12px 16px">
           <div style="font-size:12px;color:#999">${f.fecha||''}</div>
           ${f.pie?`<div style="color:#444;margin-top:4px;line-height:1.4">${(f.pie||'').replace(/</g,'&lt;')}</div>`:''}
@@ -2946,9 +2959,43 @@ function planificarVinculoElegido(sel){
   if (inputTitulo && nombre) inputTitulo.value = nombre;
 }
 
+// ── EL BORRADOR DEL PLANNER SOBREVIVE AL REPINTADO  (08/08/2026) ──────
+// Segunda red de contencion para el mismo problema. El formulario de "+ Nuevo
+// evento" se vuelve a dibujar tambien por motivos internos: tildar "Hecho" en
+// otro evento, cambiarle la hora, o el sync. Cualquiera de esos redibujados
+// vaciaba lo que se estaba escribiendo.
+// Ahora, antes de redibujar se levanta lo que hay en el formulario y despues se
+// devuelve, incluido el campo que tenia el foco. Si se cambio de dia el
+// borrador se descarta: pertenece al dia anterior y no corresponde arrastrarlo.
+let __axoPlannerBorradorDia = null;
+function axoLeerBorradorPlanner(){
+  const g = function(id){ return document.getElementById(id); };
+  if(!g('planner-form-titulo')) return null;
+  return {
+    vinculo: g('planner-form-vinculo') ? g('planner-form-vinculo').value : '',
+    titulo:  g('planner-form-titulo').value || '',
+    tipo:    g('planner-form-tipo')  ? g('planner-form-tipo').value  : '',
+    hora:    g('planner-form-hora')  ? g('planner-form-hora').value  : '',
+    notas:   g('planner-form-notas') ? g('planner-form-notas').value : '',
+    foco:    (document.activeElement && document.activeElement.id) || ''
+  };
+}
+function axoAplicarBorradorPlanner(b){
+  if(!b) return;
+  const g = function(id){ return document.getElementById(id); };
+  if(b.vinculo && g('planner-form-vinculo')) g('planner-form-vinculo').value = b.vinculo;
+  if(b.titulo  && g('planner-form-titulo'))  g('planner-form-titulo').value  = b.titulo;
+  if(b.tipo    && g('planner-form-tipo'))    g('planner-form-tipo').value    = b.tipo;
+  if(b.hora    && g('planner-form-hora'))    g('planner-form-hora').value    = b.hora;
+  if(b.notas   && g('planner-form-notas'))   g('planner-form-notas').value   = b.notas;
+  if(b.foco && g(b.foco)){ try{ g(b.foco).focus(); }catch(e){} }
+}
+
 function renderPlannerDiaDetalle(){
   const cont = document.getElementById('planner-dia-detalle');
   if (!cont) return;
+  let __bor = axoLeerBorradorPlanner();
+  if (__bor && __axoPlannerBorradorDia && __axoPlannerBorradorDia !== plannerDiaSel) __bor = null;
   if (!plannerDiaSel){
     cont.innerHTML = `<div class="card"><div class="card-body" style="color:#888;font-size:13px">Elegí un día del calendario para ver o cargar eventos.</div></div>`;
     return;
@@ -3007,6 +3054,8 @@ function renderPlannerDiaDetalle(){
       </div>
     </div>
   </div>`;
+  __axoPlannerBorradorDia = plannerDiaSel;
+  axoAplicarBorradorPlanner(__bor);
 }
 
 function agregarEventoPlanner(){
@@ -3029,6 +3078,12 @@ function agregarEventoPlanner(){
   const eventos = getPlannerEventos();
   eventos.push(evento);
   guardarPlannerEventos(eventos);
+  // El evento ya quedo guardado: se vacia el formulario a mano ANTES de
+  // repintar, si no el rescate de borrador lo volveria a llenar con lo mismo.
+  ['planner-form-titulo','planner-form-notas','planner-form-hora'].forEach(function(id){
+    const el = document.getElementById(id); if(el) el.value = '';
+  });
+  const __vs = document.getElementById('planner-form-vinculo'); if(__vs) __vs.value = '';
   renderPlanner();
 }
 
@@ -4462,8 +4517,52 @@ function axoRecargarProyectoEnMemoria(){
   catch(e){ console.warn('[repintar] no se pudo recargar el proyecto en memoria', e); return false; }
 }
 
+// ── NO REPINTAR MIENTRAS SE ESCRIBE  (08/08/2026) ─────────────────────
+// La sincronizacion automatica baja de la nube CADA 20 SEGUNDOS y, al terminar,
+// repinta la pestaña activa. Repintar = volver a armar el HTML del modulo desde
+// cero. Si en ese momento habia algo escrito en un formulario que todavia no se
+// habia guardado, ese texto se iba con el HTML viejo y no quedaba rastro.
+//
+// Ese es el bug de "escribo el agendamiento en el CRM y cuando voy a Guardar
+// esta todo vacio": no lo borraba el boton Guardar, lo borraba el tick del sync
+// que caia mientras Monica escribia. Por eso parecia intermitente y por eso
+// nunca se pudo reproducir a pedido — dependia de en que segundo del ciclo de
+// 20s se estaba tipeando.
+//
+// Afecta a cualquier campo que guarde con onchange (que recien dispara al salir
+// del campo): el Planner del CRM y la ficha del lead son los mas expuestos.
+//
+// La regla ahora: si el foco esta dentro de un campo editable, NO se repinta.
+// El repintado no se descarta, queda pendiente y se ejecuta solo cuando la
+// persona sale del campo. Lo que baja de la nube no se pierde: se muestra un
+// momento despues.
+let __axoRepintarPendiente = null;
+function axoUsuarioEscribiendo(){
+  const el = document.activeElement;
+  if(!el) return false;
+  const tag = (el.tagName||'').toUpperCase();
+  if(tag === 'INPUT' || tag === 'TEXTAREA' || tag === 'SELECT') return true;
+  if(el.isContentEditable) return true;
+  return false;
+}
+document.addEventListener('focusout', function(){
+  // Se espera un momento a proposito: al pasar de un campo al siguiente con Tab
+  // el foco queda un instante en el body, y repintar ahi seria el mismo bug.
+  setTimeout(function(){
+    if(__axoRepintarPendiente === null) return;
+    if(axoUsuarioEscribiendo()) return;
+    const rec = __axoRepintarPendiente;
+    __axoRepintarPendiente = null;
+    try{ repintarTabActivo(rec); }catch(e){ console.warn('[repintar diferido]', e); }
+  }, 400);
+});
+
 function repintarTabActivo(recargarMemoria){
   const fallaron = [];
+  if(axoUsuarioEscribiendo()){
+    __axoRepintarPendiente = !!recargarMemoria || !!__axoRepintarPendiente;
+    return { tab: (typeof tabActivoNombre==='function' ? tabActivoNombre() : ''), fallaron: fallaron, diferido: true };
+  }
   if(recargarMemoria) axoRecargarProyectoEnMemoria();
   try{ if(typeof aplicarBancoGuardado==='function') aplicarBancoGuardado(); }catch(e){ console.warn('[repintar] banco', e); }
   try{ if(typeof refrescarDatalistsCP==='function') refrescarDatalistsCP(); }catch(e){}
@@ -14713,7 +14812,9 @@ async function publicarInformeNube(){
     etapa: av.etapa,
     texto: av.texto,
     video: av.video||'',
-    fotos: av.fotos.filter(f=>!ocultas[f.id]).map(f=>({ img:f.img, pie:(pies[f.id]||'') }))
+    // 08/08/2026: se agrega vid. Sin esta marca el visor no tiene forma de saber
+    // que ese archivo es un video y lo dibujaba como si fuera una foto.
+    fotos: av.fotos.filter(f=>!ocultas[f.id]).map(f=>({ img:f.img, pie:(pies[f.id]||''), vid: !!f.vid }))
   })).filter(av=> av.texto || av.video || av.fotos.length);
   // Comentario general: solo si está activado el tilde
   const comentario = inf.mostrarComentario ? (inf.comentario||'') : '';
