@@ -656,7 +656,7 @@
   <div style="flex:1"></div>
   <button class="btn btn-primary btn-sm" onclick="guardarProyectoRapido()">💾 Guardar presupuesto</button>
   <button class="btn btn-outline btn-sm" id="btn-deshacer-guardado" style="display:none" onclick="restaurarVersionAnterior(proyectoActualNombre)" title="Restaura la versión guardada justo antes del último guardado">↩️ Deshacer</button>
-  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.07-claves</span>
+  <span id="axo-version" title="Versión del sistema — sirve para saber si estás usando el archivo actualizado" style="font-size:10px;color:#999;margin-right:10px;font-family:monospace">v2026.08.07-pedido</span>
   <button class="btn btn-outline btn-sm" onclick="exportarPDF()">⬇ Exportar PDF</button>
   <button class="btn btn-outline btn-sm" onclick="exportarExcel()">⬇ Exportar Excel</button>
 </div>
@@ -1679,7 +1679,7 @@
           <label class="form-label">Sección</label>
           <select id="compras-seccion" class="form-input" style="padding:6px 10px;font-size:13px" onchange="renderComprasCompleto()">
             <option value="materiales">📦 Compras de materiales</option>
-            <option value="listacompra">🛒 Lista de compra (qué pedir)</option>
+            <option value="listacompra">🛒 Pedido de materiales (qué comprar)</option>
             <option value="certificacion">✅ Certificación MO / subcontratos</option>
             <option value="comprobantes">📎 Comprobantes (facturas, pagos, remisiones)</option>
           </select>
@@ -9815,8 +9815,8 @@ function renderComprasCompleto() {
     if (botones) botones.innerHTML = `<button class="btn btn-primary btn-sm" onclick="toggleRepartoFactura()">🧾 Cargar factura por monto</button> <button class="btn btn-outline btn-sm" onclick="pdfCompras()">📄 PDF Compras materiales</button>`;
     renderComprasMateriales();
   } else if (seccion === 'listacompra') {
-    if (ayuda) ayuda.innerHTML = '🛒 Lo que te falta comprar, ya convertido a <strong>unidades de compra</strong> (bolsas, tumbas, etc.). Descuenta lo que ya registraste como comprado y redondea para arriba, porque nadie te vende media bolsa. Ajustá la presentación de cada material y el % de desperdicio según tu criterio.';
-    if (botones) botones.innerHTML = `<button class="btn btn-outline btn-sm" onclick="imprimirListaCompra()">🖨️ Imprimir lista</button>`;
+    if (ayuda) ayuda.innerHTML = '🛒 Acá armás tu <strong>pedido</strong>. La tabla te muestra todo lo que falta comprar, ya descontado lo que registraste como comprado. Escribí en la columna <strong>PIDO</strong> cuánto vas a pedir de cada material y el monto se calcula sobre esa cantidad. El PDF sale solo con lo que hayas pedido.';
+    if (botones) botones.innerHTML = `<button class="btn btn-primary btn-sm" onclick="imprimirListaCompra()">🖨️ Imprimir pedido</button>`;
     renderListaCompra();
   } else if (seccion === 'comprobantes') {
     if (ayuda) ayuda.innerHTML = '📎 Facturas, pagos y remisiones de esta obra. Se cargan desde el celular con la app <strong>AXO Obra</strong> (Compras) y aparecen acá solos. También podés agregarlos desde esta pantalla. Van sueltos por obra, no colgados de cada material: una factura de corralón suele cubrir varios a la vez.';
@@ -10822,19 +10822,114 @@ function presentDe(id){
   return presentacionCompra[id] || PRESENT_DEFAULT[id] || null;
 }
 function setPresentacion(id, campo, val){
-  const p = presentacionCompra[id] || Object.assign({}, PRESENT_DEFAULT[id] || {cant:1,nom:''});
+  const p = presentacionCompra[id] || Object.assign({}, PRESENT_DEFAULT[id] || {cant:0,nom:''});
   if (campo==='cant') p.cant = parseFloat(val)||0; else p.nom = val;
   presentacionCompra[id] = p;
   try{ localStorage.setItem('axo_presentaciones', JSON.stringify(presentacionCompra)); }catch(e){}
   renderListaCompra();
 }
+// ═══════════════════════════════════════════════════════════════════════
+// EL PEDIDO DE MATERIALES  (07/08/2026)
+//
+// Hasta hoy esta pantalla era de solo lectura: calculaba cuanto falta y nada
+// mas. Pero es donde Monica arma el pedido de verdad, asi que ahora se puede
+// escribir cuanto se pide de cada material y el sistema devuelve el monto de
+// ESA cantidad, no de la teorica.
+//
+// DONDE SE GUARDA, y por que asi:
+//   En su propia clave de localStorage, una por obra: axo_pedido_<obra>.
+//   NO adentro del proyecto. Meterlo en el proyecto obligaria a tocar la
+//   serializacion y el motor de fragmentos, que es justo lo que mas costo
+//   estabilizar. Asi el pedido sobrevive al F5 y no roza la sincronizacion
+//   de la obra ni por casualidad.
+//
+//   Si algun dia se quiere que el pedido lo vea el otro equipo, alcanza con
+//   sumar 'axo_pedido_' a AXO_PREFIJOS_SYNC. Nada mas.
+//
+// El pedido se guarda por ETAPA (o 'TODAS' para el consolidado), porque el
+// pedido de C1 no tiene nada que ver con el de C3.
+// ═══════════════════════════════════════════════════════════════════════
+function _claveObraPedido(){
+  const base = (typeof proyectoActualNombre !== 'undefined' && proyectoActualNombre)
+    ? proyectoActualNombre
+    : (typeof claveObraActual === 'function' ? claveObraActual() : '');
+  return 'axo_pedido_' + (String(base||'sin_obra').replace(/[^a-zA-Z0-9]/g,'_').slice(0,60) || 'sin_obra');
+}
+function _leerPedidos(){
+  try{ return JSON.parse(localStorage.getItem(_claveObraPedido())||'{}') || {}; }
+  catch(e){ return {}; }
+}
+function _guardarPedidos(obj){
+  try{ localStorage.setItem(_claveObraPedido(), JSON.stringify(obj)); }
+  catch(e){ alert('No se pudo guardar el pedido: no hay espacio en este dispositivo.'); }
+}
+function pedidoDe(id, scope){
+  const p = _leerPedidos()[scope||'TODAS'];
+  const v = p ? p[id] : null;
+  return (v===null || v===undefined || v==='') ? null : (parseFloat(v)||0);
+}
+function setPedido(id, scope, val){
+  const todo = _leerPedidos();
+  const sc = scope||'TODAS';
+  if(!todo[sc]) todo[sc] = {};
+  const n = parseFloat(val);
+  if(!val || isNaN(n) || n<=0) delete todo[sc][id]; else todo[sc][id] = n;
+  if(!Object.keys(todo[sc]).length) delete todo[sc];
+  _guardarPedidos(todo);
+  renderListaCompra();
+}
+// Llena el pedido con lo sugerido para todos los materiales de esa vista
+function pedirTodoSugerido(scope){
+  const filas = datosListaCompra(scope==='TODAS' ? ['C1','C2','C3','R'] : [scope]);
+  const todo = _leerPedidos();
+  const sc = scope||'TODAS';
+  todo[sc] = todo[sc] || {};
+  filas.forEach(r=>{ todo[sc][r.id] = r.sugerido; });
+  _guardarPedidos(todo);
+  renderListaCompra();
+}
+function limpiarPedido(scope){
+  if(!confirm('¿Borrar las cantidades que cargaste en este pedido?')) return;
+  const todo = _leerPedidos();
+  delete todo[scope||'TODAS'];
+  _guardarPedidos(todo);
+  renderListaCompra();
+}
+
 function setDesperdicioCompra(val){
   _desperdicioCompra = parseFloat(val)||0;
   try{ localStorage.setItem('axo_desperdicio', String(_desperdicioCompra)); }catch(e){}
   renderListaCompra();
 }
-function datosListaCompra(etapasArg){
+// ═══════════════════════════════════════════════════════════════════════
+// EL CALCULO DEL PEDIDO, aparte y sin depender de nada.
+//
+// Esta afuera a proposito: es la cuenta que decide cuanto se pide y cuanto
+// sale, asi que tiene que poder probarse sola. Ver _pruebas_claude/prueba_pedido.js
+//
+//   conDesp  = lo que falta comprar, con el desperdicio ya sumado (unidad base)
+//   pres     = {cant, nom} · cuanto trae un bulto. cant=0 o null: se compra suelto
+//   pedido   = cuanto decide pedir Monica, EN LA UNIDAD DE COMPRA (bultos o base)
+//   precio   = por unidad base
+// ═══════════════════════════════════════════════════════════════════════
+function axoCalcPedido(conDesp, pres, pedido, precio){
+  const hayPres = !!(pres && pres.cant > 0);
+  const bultos  = hayPres ? Math.ceil(conDesp/pres.cant) : null;
+  const aPedir  = hayPres ? bultos*pres.cant : Math.ceil(conDesp*100)/100;
+  // Lo que haria falta, ya expresado en la unidad en la que se compra
+  const sugerido = hayPres ? bultos : Math.ceil(conDesp*100)/100;
+  // Lo pedido llevado a la unidad de siempre, para compararlo y costearlo
+  const pedidoBase  = (pedido==null) ? null : (hayPres ? pedido*pres.cant : pedido);
+  const sobra       = (pedidoBase==null) ? null : (pedidoBase - conDesp);
+  const montoPedido = (pedidoBase==null) ? 0 : pedidoBase*(precio||0);
+  return { hayPres, bultos, aPedir, costo:aPedir*(precio||0),
+           sugerido, pedido, pedidoBase, sobra, montoPedido };
+}
+
+function datosListaCompra(etapasArg, scope){
   const filtroEtapa = document.getElementById('compras-filtro-etapa')?.value || 'todas';
+  if(!scope) scope = (etapasArg && etapasArg.length===1) ? etapasArg[0]
+                   : (filtroEtapa==='todas' ? 'TODAS' : filtroEtapa);
   const data = calcularNecesidades();
   const etapas = etapasArg || (filtroEtapa==='todas' ? ['C1','C2','C3','R'] : [filtroEtapa]);
   const acum = {};
@@ -10853,44 +10948,96 @@ function datosListaCompra(etapasArg){
     const saldo = Math.max(r.nec - r.comp, 0);
     const conDesp = saldo * (1 + _desperdicioCompra/100);
     const pres = presentDe(r.id);
-    const bultos = (pres && pres.cant>0) ? Math.ceil(conDesp/pres.cant) : null;
-    const aPedir = bultos!=null ? bultos*pres.cant : Math.ceil(conDesp*100)/100;
-    return Object.assign(r, { saldo, conDesp, pres, bultos, aPedir, costo:aPedir*r.precio });
+    const calc = axoCalcPedido(conDesp, pres, pedidoDe(r.id, scope), r.precio);
+    // De donde salio el precio: sirve para mostrarlo y no adivinar
+    const fuentePrecio = (precioAdjudicado('mat:'+r.id) != null) ? 'adjudicado' : 'banco';
+    return Object.assign(r, { saldo, conDesp, pres, fuentePrecio }, calc);
   }).filter(r=>r.saldo>0.0001);
 }
 // Tabla de una etapa (o del consolidado). Devuelve '' si no hay nada pendiente.
-function tablaListaCompra(filas, titulo, color){
+//
+// 07/08/2026 — dejo de ser un informe de solo lectura y paso a ser el pedido.
+// Columnas nuevas: "1 bulto trae" (rotulada, antes decia solo "Presentacion" y
+// nadie sabia que iba ahi), "Sugerido", "PIDO" editable y "Sobra".
+// El monto de cada linea es el de lo que PEDIS, no el teorico.
+function tablaListaCompra(filas, titulo, color, scope){
   if(!filas.length) return '';
-  let total=0;
+  scope = scope || 'TODAS';
+  let totalFalta = 0, totalPedido = 0, lineasPedidas = 0;
+
   const tr = filas.map(r=>{
-    total += r.costo;
+    totalFalta += r.costo;
+    if(r.pedido != null){ totalPedido += r.montoPedido; lineasPedidas++; }
     const pres = r.pres || {cant:'',nom:''};
-    return `<tr>
+    const uCompra = r.hayPres ? (pres.nom || 'bulto') : r.unidad;
+
+    // Sobra en verde, faltante en rojo. Es la respuesta a "¿me alcanza?"
+    let sobraTxt = '<span style="color:#bbb">—</span>';
+    if(r.sobra != null){
+      const v = Math.round(r.sobra*100)/100;
+      sobraTxt = (v >= 0)
+        ? `<span style="color:#2E7D32;font-weight:600">+${fmtDec(v)} ${r.unidad}</span>`
+        : `<span style="color:#C00000;font-weight:700">${fmtDec(v)} ${r.unidad} ⚠️</span>`;
+    }
+
+    const marcaPrecio = r.fuentePrecio === 'adjudicado'
+      ? '<span title="Precio de Adjudicados" style="font-size:9px;color:#2E7D32;font-weight:700">ADJ</span>'
+      : '<span title="Precio del Banco de Precios" style="font-size:9px;color:#999">banco</span>';
+
+    return `<tr${r.pedido!=null?' style="background:#F3F8F1"':''}>
       <td style="padding:6px 8px;font-size:12px;font-weight:600">${r.nombre}</td>
-      <td class="center" style="font-size:11px;color:#777">${Math.round(r.nec*100)/100} ${r.unidad}</td>
-      <td class="center" style="font-size:11px;color:#777">${Math.round(r.comp*100)/100}</td>
-      <td class="center" style="font-size:12px;font-weight:700;color:#1565C0">${Math.round(r.conDesp*100)/100} ${r.unidad}</td>
-      <td class="center" style="white-space:nowrap">
-        <input type="number" step="any" value="${pres.cant||''}" placeholder="—" onchange="setPresentacion('${r.id}','cant',this.value)" style="width:62px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:right">
-        <input type="text" value="${(pres.nom||'').replace(/"/g,'')}" placeholder="bolsa / tumba" onchange="setPresentacion('${r.id}','nom',this.value)" style="width:96px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+      <td class="center" style="font-size:11px;color:#777">${fmtDec(r.nec)} ${r.unidad}</td>
+      <td class="center" style="font-size:11px;color:#777">${fmtDec(r.comp)}</td>
+      <td class="center" style="font-size:12px;font-weight:700;color:#1565C0">${fmtDec(r.conDesp)} ${r.unidad}</td>
+      <td class="center" style="white-space:nowrap;font-size:11px;color:#666">
+        1 <input type="text" value="${(pres.nom||'').replace(/"/g,'&quot;')}" placeholder="bolsa" onchange="setPresentacion('${r.id}','nom',this.value)" style="width:72px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px">
+        = <input type="number" step="any" value="${pres.cant||''}" placeholder="—" onchange="setPresentacion('${r.id}','cant',this.value)" style="width:58px;padding:3px 5px;border:1px solid #ccc;border-radius:4px;font-size:11px;text-align:right"> ${r.unidad}
       </td>
-      <td class="center" style="font-size:14px;font-weight:800;color:#C05000">${r.bultos!=null ? r.bultos : (Math.round(r.conDesp*100)/100+' '+r.unidad)}</td>
-      <td class="num" style="font-size:11px;color:#666">${fmtN(Math.round(r.costo))}</td>
+      <td class="center" style="font-size:11px">
+        <span onclick="setPedido('${r.id}','${scope}',${r.sugerido})" title="Tocá para pedir esta cantidad" style="cursor:pointer;color:#1565C0;font-weight:700;text-decoration:underline dotted">${fmtDec(r.sugerido)}</span>
+        <span style="color:#999"> ${uCompra}</span>
+      </td>
+      <td class="center">
+        <input type="number" step="any" min="0" value="${r.pedido!=null?r.pedido:''}" placeholder="—"
+               onchange="setPedido('${r.id}','${scope}',this.value)"
+               style="width:74px;padding:5px 6px;border:2px solid ${r.pedido!=null?'#4A6741':'#ccc'};border-radius:5px;font-size:13px;font-weight:700;text-align:right;color:#C05000">
+        <div style="font-size:9px;color:#999;margin-top:2px">${uCompra}</div>
+      </td>
+      <td class="center" style="font-size:11px">${sobraTxt}</td>
+      <td class="num" style="font-size:12px;font-weight:${r.pedido!=null?'700':'400'};color:${r.pedido!=null?'#C05000':'#bbb'}">
+        ${r.pedido!=null ? fmtN(Math.round(r.montoPedido)) : '—'}
+        <div style="font-size:9px;font-weight:400;color:#aaa">${marcaPrecio}</div>
+      </td>
     </tr>`;
   }).join('');
-  return `<div class="card"><div class="card-header" style="background:${color}">${titulo}</div>
+
+  return `<div class="card"><div class="card-header" style="background:${color};display:flex;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>${titulo}</span>
+      <div style="margin-left:auto;display:flex;gap:7px">
+        <button onclick="pedirTodoSugerido('${scope}')" style="border:none;background:rgba(255,255,255,0.22);color:#fff;border-radius:5px;cursor:pointer;padding:5px 11px;font-size:11px;font-weight:600">Pedir todo lo sugerido</button>
+        <button onclick="limpiarPedido('${scope}')" style="border:none;background:rgba(255,255,255,0.12);color:#fff;border-radius:5px;cursor:pointer;padding:5px 11px;font-size:11px">Limpiar</button>
+      </div>
+    </div>
     <div class="card-body" style="padding:0;overflow-x:auto">
       <table class="tbl"><thead><tr>
         <th>Material</th>
         <th class="center">Necesario</th>
         <th class="center">Ya comprado</th>
         <th class="center">Falta (+desp.)</th>
-        <th class="center">Presentación</th>
-        <th class="center">A PEDIR</th>
-        <th class="num">Costo est. ₲</th>
+        <th class="center">1 bulto trae</th>
+        <th class="center">Sugerido</th>
+        <th class="center" style="background:#4A6741">PIDO</th>
+        <th class="center">Sobra</th>
+        <th class="num">Monto ₲</th>
       </tr></thead><tbody>${tr}
-      <tr style="background:#FFF3E0;font-weight:700"><td colspan="6" style="padding:8px">Costo estimado</td><td class="num">${fmtN(Math.round(total))}</td></tr>
+      <tr style="background:#FAFAFA;color:#888"><td colspan="8" style="padding:7px;font-size:11px">Si comprara todo lo que falta (referencia)</td><td class="num" style="font-size:11px">${fmtN(Math.round(totalFalta))}</td></tr>
+      <tr style="background:#FFF3E0;font-weight:800"><td colspan="8" style="padding:9px">TU PEDIDO${lineasPedidas?' — '+lineasPedidas+' material(es)':' — todavía no cargaste cantidades'}</td><td class="num" style="font-size:14px;color:#C05000">${fmtN(Math.round(totalPedido))}</td></tr>
       </tbody></table></div></div>`;
+}
+// Numeros cortos: sin decimales si es entero, con dos si no
+function fmtDec(n){
+  const v = Math.round((parseFloat(n)||0)*100)/100;
+  return Number.isInteger(v) ? String(v) : v.toLocaleString('es-PY',{minimumFractionDigits:0, maximumFractionDigits:2});
 }
 function renderListaCompra(){
   const container = document.getElementById('compras-container');
@@ -10905,34 +11052,56 @@ function renderListaCompra(){
   if (filtroEtapa === 'todas') {
     // Una lista por etapa: qué comprar en cada momento de la obra
     ['C1','C2','C3','R'].forEach(et=>{
-      cuerpo += tablaListaCompra(datosListaCompra([et]), '🛒 '+ET_LABELS[et]+' — qué pedir', ET_COLORS[et]);
+      cuerpo += tablaListaCompra(datosListaCompra([et], et), '🛒 '+ET_LABELS[et]+' — qué pedir', ET_COLORS[et], et);
     });
-    const cons = tablaListaCompra(datosListaCompra(['C1','C2','C3','R']), '📋 CONSOLIDADO — toda la obra', '#4A6741');
+    const cons = tablaListaCompra(datosListaCompra(['C1','C2','C3','R'], 'TODAS'), '📋 CONSOLIDADO — toda la obra', '#4A6741', 'TODAS');
     if (cons) cuerpo += cons;
   } else {
-    cuerpo = tablaListaCompra(datosListaCompra([filtroEtapa]), '🛒 '+ET_LABELS[filtroEtapa]+' — qué pedir', ET_COLORS[filtroEtapa]);
+    cuerpo = tablaListaCompra(datosListaCompra([filtroEtapa], filtroEtapa), '🛒 '+ET_LABELS[filtroEtapa]+' — qué pedir', ET_COLORS[filtroEtapa], filtroEtapa);
   }
   if(!cuerpo){ container.innerHTML = `<div class="card"><div class="card-body"><div class="alert alert-warn">No queda nada por comprar: o no hay cantidades cargadas en el Costeo, o ya registraste todas las compras.</div></div></div>`; return; }
   container.innerHTML = cab + cuerpo + `<div class="card"><div class="card-body" style="font-size:11px;color:#777">
-      Cargá la <strong>presentación</strong> de cada material (cuánto viene por bulto: 50 kg la bolsa de cemento, los m³ que trae una tumba según tu proveedor) y la columna <strong>A PEDIR</strong> te da los bultos redondeados para arriba. Si dejás la presentación vacía, muestra la cantidad en la unidad original.<br>
-      Con el filtro en <strong>Todas las etapas</strong> ves una lista por etapa más el consolidado. Ojo: el consolidado no es la suma de los bultos de cada etapa, porque cada etapa redondea por su cuenta — si vas a comprar todo junto, usá el consolidado.
+      <strong>1 bulto trae</strong>: cargá cómo te vende el proveedor — <em>1 bolsa = 50 kg</em>, <em>1 tumba = 6 m³</em>. Se carga una sola vez por material y queda para todas tus obras. <strong>No modifica el Banco de Precios</strong>: ahí el cemento sigue en kg, como necesitan las recetas. Es solo una traducción para comprar.<br>
+      <strong>Sugerido</strong> es lo que haría falta; tocalo y se copia al pedido. <strong>PIDO</strong> es lo que vos decidís: escribí ahí y el monto de la derecha es el de esa cantidad. <strong>Sobra</strong> te dice si te alcanza (verde) o te quedás corta (rojo).<br>
+      El <strong>PDF sale solo con las líneas donde cargaste cantidad</strong>. Si no cargaste ninguna, te avisa.<br>
+      Con el filtro en <strong>Todas las etapas</strong> ves una lista por etapa más el consolidado, y cada una guarda su propio pedido. Ojo: el consolidado no es la suma de los bultos de cada etapa, porque cada etapa redondea por su cuenta — si vas a comprar todo junto, usá el consolidado.
     </div></div>`;
 }
+// El PDF es EL PEDIDO: salen solo los materiales a los que les pusiste
+// cantidad. Los demas no aparecen — es una orden de compra, no un informe.
 function imprimirListaCompra(){
-  const filas = datosListaCompra();
-  if(!filas.length){ alert('No hay nada pendiente de comprar.'); return; }
+  const filtroEtapa = document.getElementById('compras-filtro-etapa')?.value || 'todas';
+  const scope = filtroEtapa==='todas' ? 'TODAS' : filtroEtapa;
+  const etapas = filtroEtapa==='todas' ? ['C1','C2','C3','R'] : [filtroEtapa];
+  const todas = datosListaCompra(etapas, scope);
+  const filas = todas.filter(r=>r.pedido != null && r.pedido > 0);
+
+  if(!todas.length){ alert('No hay nada pendiente de comprar en esta etapa.'); return; }
+  if(!filas.length){
+    alert('Todavía no cargaste cantidades en la columna PIDO.\n\nEscribí cuánto querés pedir de cada material — o usá "Pedir todo lo sugerido" — y volvé a imprimir.');
+    return;
+  }
+
   let total=0;
-  const tr = filas.map(r=>{ total+=r.costo;
-    return `<tr><td>${r.nombre}</td><td class="center">${Math.round(r.conDesp*100)/100} ${r.unidad}</td>
-      <td class="center"><strong>${r.bultos!=null ? r.bultos+' × '+(r.pres.nom||r.pres.cant+' '+r.unidad) : (Math.round(r.conDesp*100)/100+' '+r.unidad)}</strong></td>
-      <td class="num">${fmtN(Math.round(r.costo))}</td></tr>`; }).join('');
+  const tr = filas.map(r=>{
+    total += r.montoPedido;
+    const uCompra = r.hayPres ? (r.pres.nom || 'bulto') : r.unidad;
+    const equiv = r.hayPres ? ` <span style="color:#666">(${fmtDec(r.pedidoBase)} ${r.unidad})</span>` : '';
+    return `<tr><td>${r.nombre}</td>
+      <td class="center"><strong>${fmtDec(r.pedido)} ${uCompra}</strong>${equiv}</td>
+      <td class="center" style="color:#666">${fmtDec(r.conDesp)} ${r.unidad}</td>
+      <td class="num">${fmtN(Math.round(r.montoPedido))}</td></tr>`;
+  }).join('');
+
   const obra = (typeof proyectoActualNombre!=='undefined' && proyectoActualNombre) ? proyectoActualNombre : '';
+  const etTxt = filtroEtapa==='todas' ? 'toda la obra' : (ET_LABELS[filtroEtapa]||filtroEtapa);
   const c = `<div class="pg"><h1>AXO Construcciones</h1>
-    <div class="meta">Lista de compra${obra?' · '+obra:''} · ${new Date().toLocaleDateString('es-PY')} · desperdicio ${_desperdicioCompra}%</div>
-    <table><thead><tr><th>Material</th><th class="center">Cantidad</th><th class="center">A pedir</th><th class="num">Costo est. ₲</th></tr></thead>
-    <tbody>${tr}<tr style="background:#E8F0E5;font-weight:700"><td colspan="3">TOTAL ESTIMADO</td><td class="num">${fmtN(Math.round(total))}</td></tr></tbody></table>
-    <p style="margin-top:16px;font-size:11px;color:#666">Cantidades ya descontadas de lo comprado y redondeadas a la unidad de venta.</p></div>`;
-  abrirPDF('Lista de compra', c);
+    <div class="meta">Pedido de materiales${obra?' · '+obra:''} · ${etTxt} · ${new Date().toLocaleDateString('es-PY')}${_desperdicioCompra?' · desperdicio '+_desperdicioCompra+'%':''}</div>
+    <table><thead><tr><th>Material</th><th class="center">Cantidad a pedir</th><th class="center">Necesario</th><th class="num">Monto est. ₲</th></tr></thead>
+    <tbody>${tr}<tr style="background:#E8F0E5;font-weight:700"><td colspan="3">TOTAL DEL PEDIDO</td><td class="num">${fmtN(Math.round(total))}</td></tr></tbody></table>
+    <p style="margin-top:16px;font-size:11px;color:#666">Cantidades ya descontadas de lo que se compró. Los montos son estimados de referencia, no una cotización.</p>
+    <p style="margin-top:22px;font-size:11px">Proveedor: __________________________ &nbsp;·&nbsp; Fecha de entrega: __________ &nbsp;·&nbsp; Forma de pago: __________</p></div>`;
+  abrirPDF('Pedido de materiales', c);
 }
 
 // ── Compras de materiales (todo lo cargado en el Costeo, con o sin Adjudicados, por etapa) ──
