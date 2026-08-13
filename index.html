@@ -6376,17 +6376,24 @@ function auditarAlertasPrecioTodasLasObras() {
 
   const resultados = [];
   let sinDato = 0;
+  // 12/08/2026 — no alcanza con contar cuantas obras no tienen precios congelados:
+  // hay que poder decir CUALES, porque en esas el sistema sigue mostrando el precio
+  // vivo del banco en Compras y Adjudicados y no hay de donde sacar el viejo.
+  const sinDatoNombres = [];
+  const conDato = [];
   nombres.forEach(nombre => {
     const p = guardadas[nombre];
     if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return;
-    if (!p.snapshotAprobado || !p.snapshotAprobado.preciosInsumos) { sinDato++; return; }
+    if (!p.snapshotAprobado || !p.snapshotAprobado.preciosInsumos) { sinDato++; sinDatoNombres.push(nombre); return; }
+    conDato.push(nombre + ' — ' + Object.keys(p.snapshotAprobado.preciosInsumos).length + ' insumos congelados' +
+      (p.snapshotAprobado.fecha ? ' (' + new Date(p.snapshotAprobado.fecha).toLocaleDateString('es-PY') + ')' : ''));
     const alertas = calcularAlertasPrecioProyecto(p.snapshotAprobado, p.tipologia || 'basico');
     if (alertas.length) resultados.push({ nombre, alertas });
   });
 
   if (!resultados.length) {
     let msg = '✅ Revisé las obras aprobadas/finalizadas guardadas y no encontré subas de precio mayores al 15%.';
-    if (sinDato > 0) msg += '\n\n(' + sinDato + ' obra(s) aprobada(s) antes de activar esta función no tienen el dato guardado — se van a poder auditar recién cuando se vuelvan a aprobar de nuevo.)';
+    msg += detalleCongelados(conDato, sinDatoNombres);
     alert(msg);
     return;
   }
@@ -6398,8 +6405,26 @@ function auditarAlertasPrecioTodasLasObras() {
     });
   });
   msg += '\nCorresponde evaluar trasladar la diferencia al cliente según cláusula contractual (no modifica el presupuesto congelado).';
-  if (sinDato > 0) msg += '\n\n(' + sinDato + ' obra(s) aprobada(s) antes de activar esta función no tienen el dato guardado.)';
+  msg += detalleCongelados(conDato, sinDatoNombres);
   alert(msg);
+}
+
+// Detalle de que obras tienen precios congelados utilizables y cuales no.
+// Las que NO tienen son las unicas donde Compras/Adjudicados siguen mostrando
+// el precio vivo del banco, porque no hay precio viejo guardado que mostrar.
+function detalleCongelados(conDato, sinDatoNombres) {
+  let t = '';
+  if (conDato.length) {
+    t += '\n\n✅ Obras con precios congelados (Compras y Adjudicados usan el precio del presupuesto):\n';
+    conDato.forEach(x => t += '   • ' + x + '\n');
+  }
+  if (sinDatoNombres.length) {
+    t += '\n⚠️ Obras aprobadas SIN precios congelados (aprobadas antes de que existiera esta función).\n';
+    t += 'En estas, Compras y Adjudicados siguen mostrando el precio actual del banco porque no hay precio viejo guardado:\n';
+    sinDatoNombres.forEach(x => t += '   • ' + x + '\n');
+    t += 'Ojo: volver a aprobarlas captura los precios de HOY, no los originales.\n';
+  }
+  return t;
 }
 
 // ════════════════════════════════════════════════════════
@@ -6773,11 +6798,63 @@ function subTotal(cod, tip) {
   if (!IS_SUB.has(cod)) return 0;
   const v = subcontratos[cod];
   if (v !== undefined && v !== '' && v !== null) return parseFloat(v) || 0;
-  const sc = SUB_COD_A_CAT[cod] ? subcontratosCat.find(s => s.id === SUB_COD_A_CAT[cod]) : null;
-  if (!sc) return 0;
+  const catId = SUB_COD_A_CAT[cod];
+  if (!catId || !subcontratosCat.find(s => s.id === catId)) return 0;
   tip = tip || (document.getElementById('p-tipologia')?.value || 'basico');
-  const ref = (tip === 'superior') ? sc.precioRefSup : sc.precioRefBas;
+  // 12/08/2026 — proyecto aprobado: manda el precio de referencia congelado
+  const ref = precioSubRefVigente(catId, tip);
   return (parseFloat(cantidades[cod] || 0)) * (ref || 0);
+}
+
+// ════════════════════════════════════════════════════════
+// PRECIOS VIGENTES DEL PROYECTO  (12/08/2026)
+// ────────────────────────────────────────────────────────
+// Regla: si el proyecto esta Aprobado/Finalizado, el precio que vale para TODO
+// (oferta, capitulos, compras, adjudicados, exportaciones) es el que quedo
+// CONGELADO al aprobar, guardado en snapshotAprobado.preciosInsumos.
+// El Banco puede seguir subiendo: eso lo avisa la alerta de suba de precios,
+// pero no debe reescribir la base con la que se vendio ni con la que se
+// adjudica. Antes solo estaban congelados cd/cdByEtapa/pv; Compras y
+// Adjudicados seguian recalculando con el banco vivo y mostraban el precio
+// nuevo, que es justo el que no sirve para adjudicar.
+// Si un insumo no esta en el snapshot (se agrego despues de aprobar), cae solo
+// al precio vivo.
+// ════════════════════════════════════════════════════════
+// La pestaña Banco de Precios muestra el CATALOGO compartido, no el proyecto:
+// ahi los precios tienen que verse siempre vivos aunque haya un proyecto aprobado
+// abierto. Ese es el unico lugar que levanta esta bandera.
+let _forzarPreciosVivos = false;
+function precioCongelado(key) {
+  if (_forzarPreciosVivos) return null;
+  if (!snapshotAprobado || !snapshotAprobado.preciosInsumos) return null;
+  const info = snapshotAprobado.preciosInsumos[key];
+  return (info && info.precio > 0) ? info.precio : null;
+}
+// El snapshot solo guardo los precios de la tipologia con la que se aprobo
+function tipCongelada() {
+  if (_forzarPreciosVivos) return null;
+  return (snapshotAprobado && snapshotAprobado.preciosInsumos) ? (snapshotAprobado.tipologia || 'basico') : null;
+}
+function precioMatVigente(id, tip) {
+  const m = getMaterial(id);
+  const vivo = m ? (tip === 'superior' ? m.pSup : m.pBas) : 0;
+  if (tipCongelada() !== tip) return vivo;
+  const c = precioCongelado('M:' + id);
+  return (c != null) ? c : vivo;
+}
+function precioMOVigente(id, tip) {
+  const o = getMO(id);
+  const vivo = o ? (tip === 'superior' ? o.pSup : o.pBas) : 0;
+  if (tipCongelada() !== tip) return vivo;
+  const c = precioCongelado('MO:' + id);
+  return (c != null) ? c : vivo;
+}
+function precioSubRefVigente(catId, tip) {
+  const sc = subcontratosCat.find(x => x.id === catId);
+  const vivo = sc ? ((tip === 'superior' ? sc.precioRefSup : sc.precioRefBas) || 0) : 0;
+  if (tipCongelada() !== tip) return vivo;
+  const c = precioCongelado('S:' + catId);
+  return (c != null) ? c : vivo;
 }
 
 function getMatUnit(cod) {  const row = getBancoRow(cod);
@@ -6813,24 +6890,21 @@ function recalcularBancoDesdeRecetas() {
 
     let matBas = 0, matSup = 0, moBas = 0, moSup = 0;
 
+    // 12/08/2026 — precios vigentes del proyecto (congelados si esta aprobado)
     (receta.materiales || []).forEach(item => {
       const m = getMaterial(item.id);
       if (!m) return;
-      matBas += item.cant * m.pBas;
+      matBas += item.cant * precioMatVigente(item.id, 'basico');
       // Si la línea tiene insumo alternativo para Superior (ej. porcelanato), usarlo
-      if (item.idSup) {
-        const mSup = getMaterial(item.idSup);
-        matSup += item.cant * (mSup ? mSup.pSup : m.pSup);
-      } else {
-        matSup += item.cant * m.pSup;
-      }
+      const idS = (item.idSup && getMaterial(item.idSup)) ? item.idSup : item.id;
+      matSup += item.cant * precioMatVigente(idS, 'superior');
     });
 
     (receta.mo || []).forEach(item => {
       const mo = getMO(item.id);
       if (!mo) return;
-      moBas += item.cant * mo.pBas;
-      moSup += item.cant * mo.pSup;
+      moBas += item.cant * precioMOVigente(item.id, 'basico');
+      moSup += item.cant * precioMOVigente(item.id, 'superior');
     });
 
     banco[idx][4] = Math.round(matBas);
@@ -6844,9 +6918,10 @@ function recalcularBancoDesdeRecetas() {
   banco.forEach(row => {
     const cod = row[1];
     if (IS_SUB.has(cod)) {
-      const sub = SUB_COD_A_CAT[cod] ? subcontratosCat.find(s => s.id === SUB_COD_A_CAT[cod]) : null;
-      row[4] = sub ? (sub.precioRefBas || 0) : 0;
-      row[5] = sub ? (sub.precioRefSup || 0) : 0;
+      const catId = SUB_COD_A_CAT[cod];
+      const sub = catId ? subcontratosCat.find(s => s.id === catId) : null;
+      row[4] = sub ? precioSubRefVigente(catId, 'basico')   : 0;
+      row[5] = sub ? precioSubRefVigente(catId, 'superior') : 0;
       row[6] = 0;
       row[7] = 0;
     }
@@ -6877,7 +6952,7 @@ function calcular() {
       if (IS_SUB.has(cod)) {
         const manual = (subcontratos[cod] !== undefined && subcontratos[cod] !== '' && subcontratos[cod] !== null);
         const refCat = SUB_COD_A_CAT[cod] ? subcontratosCat.find(s => s.id === SUB_COD_A_CAT[cod]) : null;
-        const refPrecio = refCat ? (tip === 'superior' ? refCat.precioRefSup : refCat.precioRefBas) : 0;
+        const refPrecio = refCat ? precioSubRefVigente(refCat.id, tip) : 0;
         const sub = manual ? parseFloat(subcontratos[cod]) : (cant * refPrecio);
         if (sub > 0) {
           cd += sub;
@@ -7693,7 +7768,9 @@ function renderAlertasGlobal(pf, cdByEtapa, cobroExtraAdicionalesByEtapa, cobroE
 // RENDER BANCO DE PRECIOS
 // ════════════════════════════════════════════════════════
 function renderBanco() {
+  _forzarPreciosVivos = true;
   recalcularBancoDesdeRecetas();
+  _forzarPreciosVivos = false;
   const body = document.getElementById('banco-body');
   if (!body) return;
   let html = ''; let prevCat = '';
@@ -7738,6 +7815,8 @@ function renderBanco() {
     }
   });
   body.innerHTML = html;
+  // Dejar el banco como lo espera el resto del sistema (precios del proyecto)
+  recalcularBancoDesdeRecetas();
 }
 
 // ════════════════════════════════════════════════════════
@@ -9684,7 +9763,7 @@ function calcularNecesidades() {
       const id = (tip === 'superior' && item.idSup) ? item.idSup : item.id;
       const m = getMaterial(id);
       if (!m) return;
-      const precio = tip === 'superior' ? m.pSup : m.pBas;
+      const precio = precioMatVigente(id, tip);   // congelado si el proyecto esta aprobado
       const totalCant = item.cant * cant;
       if (!bucket.mat[id]) bucket.mat[id] = { nombre:m.nombre, unidad:m.unidad, cant:0, precio, costo:0 };
       bucket.mat[id].cant += totalCant;
@@ -9694,7 +9773,7 @@ function calcularNecesidades() {
     (receta.mo || []).forEach(item => {
       const mo = getMO(item.id);
       if (!mo) return;
-      const precio = tip === 'superior' ? mo.pSup : mo.pBas;
+      const precio = precioMOVigente(item.id, tip);   // congelado si el proyecto esta aprobado
       const totalCant = item.cant * cant;
       if (!bucket.mo[item.id]) bucket.mo[item.id] = { nombre:mo.nombre, unidad:mo.unidad, cant:0, precio, costo:0 };
       bucket.mo[item.id].cant += totalCant;
@@ -9721,7 +9800,7 @@ function calcularNecesidades() {
     (receta.materiales || []).forEach(item => {
       const id = (tip==='superior'&&item.idSup)?item.idSup:item.id;
       const m = getMaterial(id); if (!m) return;
-      const precio = tip==='superior'?m.pSup:m.pBas;
+      const precio = precioMatVigente(id, tip);
       const totalCant = item.cant*cant;
       const key = id+sufijo;
       if (!bucket.mat[key]) bucket.mat[key] = { nombre:'➕ '+m.nombre+' (adic.)', unidad:m.unidad, cant:0, precio, costo:0, adic:true, realId:id };
@@ -9729,7 +9808,7 @@ function calcularNecesidades() {
     });
     (receta.mo || []).forEach(item => {
       const mo = getMO(item.id); if (!mo) return;
-      const precio = tip==='superior'?mo.pSup:mo.pBas;
+      const precio = precioMOVigente(item.id, tip);
       const totalCant = item.cant*cant;
       const key = item.id+sufijo;
       if (!bucket.mo[key]) bucket.mo[key] = { nombre:'➕ '+mo.nombre+' (adic.)', unidad:mo.unidad, cant:0, precio, costo:0, adic:true, realId:item.id };
@@ -10649,7 +10728,7 @@ function necesidadMaterialesPorCategoria(categoria, et) {
       const id = (tip === 'superior' && item.idSup) ? item.idSup : item.id;
       const m = getMaterial(id);
       if (!m) return;
-      const precio = tip === 'superior' ? m.pSup : m.pBas;
+      const precio = precioMatVigente(id, tip);
       const totalCant = item.cant * cant;
       if (!out[id]) out[id] = { nombre:m.nombre, unidad:m.unidad, precio, necesario:0 };
       out[id].necesario += totalCant;
@@ -11737,7 +11816,21 @@ function getItemsAdjudicables(filtroEtapa) {
       moAcum[id].cant += m.cant;
     });
     d.sub.forEach(s => {
-      if (!subAcum[s.cod]) subAcum[s.cod] = { key:'sub:'+s.cod, tipo:'sub', nombre:s.desc, unidad:'gl', cant:s.cant||1, precioRef:s.costo };
+      if (!subAcum[s.cod]) {
+        // 12/08/2026 — FIX Adjudicados/Comparativo de subcontratos.
+        // Antes: precioRef = s.costo, que es el costo TOTAL del subcontrato
+        // (cantidad x precio de referencia del banco). Como la tabla calcula
+        // costoRef = precioRef x cant, los subcontratos con cantidad > 1
+        // (verja de metal en m2, contramarcos de madera en ml) se multiplicaban
+        // dos veces y saltaban a cientos de millones. Ademas la unidad salia
+        // siempre 'gl' aunque el rubro fuera m2 o ml.
+        // Ahora: precioRef = precio UNITARIO real y unidad = la del banco.
+        const cantSub = (parseFloat(s.cant) > 0) ? parseFloat(s.cant) : 1;
+        const rowSub  = getBancoRow(String(s.cod).split('#')[0]);
+        subAcum[s.cod] = { key:'sub:'+s.cod, tipo:'sub', nombre:s.desc,
+                           unidad: (rowSub && rowSub[3]) ? rowSub[3] : 'gl',
+                           cant: cantSub, precioRef: s.costo / cantSub };
+      }
     });
   });
   return { mat:Object.values(matAcum), mo:Object.values(moAcum), sub:Object.values(subAcum) };
