@@ -7001,6 +7001,29 @@ function calcular() {
     }
   });
 
+  // ── ÍTEMS MANUALES (FIX ago2026) ────────────────────────────────────────
+  // Lo que se compra fuera del catálogo (Seguimiento → Compras → "ítem manual")
+  // ya salía del Flujo de Caja como egreso real, pero NUNCA entraba al cd. La
+  // bolsa Obra se vaciaba sin haberse llenado nunca y la rentabilidad del
+  // Dashboard salía inflada, porque el costo real era mayor que el cd mostrado.
+  //
+  // Criterio (igual que la Corrección de Cómputo): suma al COSTO interno, no al
+  // precio de venta. Por eso se acumula aparte y se descuenta del cd que arma el
+  // pv más abajo: lo que se le cobra al cliente es lo pactado, pase lo que pase.
+  let cdItemsManuales = 0;
+  (itemsManuales || []).forEach(it => {
+    if (!it || !it.tipo) return;
+    const cantIM   = parseFloat(it.cant   || 0) || 0;
+    const precioIM = parseFloat(it.precio || 0) || 0;
+    const costo = cantIM * precioIM;
+    if (costo <= 0) return;
+    const et = it.etapa || 'C1';
+    if (cdByEtapa[et] === undefined) cdByEtapa[et] = 0;
+    cd += costo;
+    cdByEtapa[et] += costo;
+    cdItemsManuales += costo;
+  });
+
   const cobroExtraTotal = Object.values(cobroExtraAdicionalesByEtapa).reduce((a,b)=>a+b,0);
 
   const gd  = pct(document.getElementById('idx-gd')?.value);
@@ -7013,10 +7036,12 @@ function calcular() {
 
   // pv (Precio de Venta) congelado si el proyecto está aprobado: la corrección de cómputo
   // NO debe inflar/reducir lo que ya se le cobra al cliente, solo tu costo interno.
-  const pv = (pvCongelado !== null) ? pvCongelado : cd * (1 + idx);
+  // Los ítems manuales tampoco inflan el pv: son costo de ejecución, no venta nueva.
+  // Por eso se restan del cd acá (y solo acá). El cd que se devuelve sí los incluye.
+  const pv = (pvCongelado !== null) ? pvCongelado : (cd - cdItemsManuales) * (1 + idx);
   const pf = pv + gaExtra - desc + cobroExtraTotal;
 
-  return { cd, cdByEtapa, idx, pv, pf, gd, gi, iva, util, cdAdicionalesCorreccion, cobroExtraAdicionalesByEtapa, cobroExtraTotal };
+  return { cd, cdByEtapa, idx, pv, pf, gd, gi, iva, util, cdAdicionalesCorreccion, cdItemsManuales, cobroExtraAdicionalesByEtapa, cobroExtraTotal };
 }
 
 // ════════════════════════════════════════════════════════
@@ -9884,6 +9909,7 @@ function addItemManual(tipoPorDefecto) {
   invalidarHist();
   renderComprasCompleto();
   recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
   autosaveSeguimiento();
   registrarActividad('Ítem manual agregado en Compras: ' + nombre, document.getElementById('p-cliente')?.value || '');
 }
@@ -9903,6 +9929,7 @@ function delItemManual(id) {
   invalidarHist();
   renderComprasCompleto();
   recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
   autosaveSeguimiento();
 }
 
@@ -9919,6 +9946,7 @@ function setItemManual(id, campo, val) {
   invalidarHist();
   renderComprasCompleto();
   recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
   autosaveSeguimiento();
 }
 
@@ -11590,6 +11618,7 @@ function addAdelanto() {
   ['adl-prov','adl-monto','adl-concepto'].forEach(i => { if (g(i)) g(i).value = ''; });
   renderComprasCompleto();
   recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
   autosaveSeguimiento();
   registrarActividad('Adelanto a ' + prov + ': ₲' + fmtN(Math.round(monto)), document.getElementById('p-cliente')?.value || '');
 }
@@ -11599,14 +11628,18 @@ function delAdelanto(id) {
   if (!ad) return;
   if (!confirm('¿Eliminar el adelanto de ₲' + fmtN(Math.round(ad.monto || 0)) + ' a ' + ad.prov + '?')) return;
   adelantos = adelantos.filter(x => x.id !== id);
-  renderComprasCompleto(); recalcular(); autosaveSeguimiento();
+  renderComprasCompleto(); recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
+  autosaveSeguimiento();
 }
 
 function setAdelanto(id, campo, val) {
   const ad = (adelantos || []).find(x => x && x.id === id);
   if (!ad) return;
   ad[campo] = (campo === 'monto') ? (parseFloat(val) || 0) : val;
-  renderComprasCompleto(); recalcular(); autosaveSeguimiento();
+  renderComprasCompleto(); recalcular();
+  if (typeof renderFlujo === 'function') renderFlujo();
+  autosaveSeguimiento();
 }
 
 function panelAdelantos() {
@@ -12257,7 +12290,7 @@ function renderFlujo() {
   const container = document.getElementById('flujo-container');
   if (!container) return;
   const c = calcular();
-  const { pf, cd, cdByEtapa, gd, gi, iva, util, cobroExtraAdicionalesByEtapa, cobroExtraTotal } = c;
+  const { pf, cd, cdByEtapa, gd, gi, iva, util, cdItemsManuales, cobroExtraAdicionalesByEtapa, cobroExtraTotal } = c;
   const eg = egresosPorEtapa();                       // egresos reales a proveedores por etapa
   const ET = ['C1','C2','C3','R'];
   const ET_LBL = { C1:'C1 — Anticipo', C2:'C2 — Avance', C3:'C3 — Avance', R:'Retención' };
@@ -12397,7 +12430,7 @@ function renderFlujo() {
     <tbody>${filasC}
     <tr style="background:#E8F0E5;font-weight:700;border-top:2px solid #4A6741"><td style="padding:8px 10px">TOTAL</td><td class="num">${fmtN(Math.round(tCar))}</td><td class="num" style="color:#2E7D32">${fmtN(Math.round(tIn))}</td><td class="num" style="color:#C05000">${fmtN(Math.round(tUso))}</td><td class="num" style="color:${tDisp>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(tDisp))}</td></tr>
     </tbody></table>
-    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Usado de Obra = pagos reales a proveedores (₲ ${fmtN(Math.round(egProveedores))}, automático desde Compras/Adjudicados) + salidas manuales de Obra. IVA es reserva para Hacienda — no es plata a repartir.</div>
+    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Usado de Obra = pagos reales a proveedores (₲ ${fmtN(Math.round(egProveedores))}, automático desde Compras/Adjudicados) + salidas manuales de Obra. IVA es reserva para Hacienda — no es plata a repartir.${(cdItemsManuales>0)?`<br><span style="color:#C05000;font-weight:600">✋ Incluye ₲ ${fmtN(Math.round(cdItemsManuales))} de ítems fuera del catálogo</span> — suman al costo de obra de su etapa, no al precio de venta pactado.`:''}</div>
   </div></div>
 
   <div class="card"><div class="card-header" style="background:#555">➕ Movimientos manuales — gastos que NO son de obra (GD · GI · IVA · Utilidad)
