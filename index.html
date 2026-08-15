@@ -785,7 +785,7 @@
         <div class="stat-box"><div class="stat-label">Costo Directo</div><div class="stat-value" id="res-cd">₲ 0</div></div>
         <div class="stat-box accent"><div class="stat-label">Precio de Venta</div><div class="stat-value accent" id="res-pv">₲ 0</div></div>
         <div class="stat-box blue"><div class="stat-label">Precio Final (c/desc.)</div><div class="stat-value" id="res-pf" style="color:var(--blue)">₲ 0</div></div>
-        <div class="stat-box"><div class="stat-label">Anticipo 35%</div><div class="stat-value verde" id="res-ant">₲ 0</div></div>
+        <div class="stat-box"><div class="stat-label" id="res-ant-lbl">Anticipo</div><div class="stat-value verde" id="res-ant">₲ 0</div></div>
       </div>
       <div class="input-row" style="margin-top:12px">
         <div class="form-group">
@@ -1146,6 +1146,7 @@
         <input type="file" id="input-excel-import" accept=".xlsx,.xls,.csv" style="display:none" onchange="manejarArchivoExcel(this.files[0])">
         <button class="btn btn-outline btn-sm" onclick="auditarHuerfanasTodasLasObras()" title="Revisa todas las obras guardadas en busca de compras registradas de ítems ya eliminados">🔍 Auditar compras huérfanas (todas las obras)</button>
         <button class="btn btn-outline btn-sm" onclick="auditarAlertasPrecioTodasLasObras()" title="Revisa todas las obras aprobadas en busca de rubros del Banco que subieron más de 15% desde la aprobación">📈 Alertas de suba de precio (todas las obras)</button>
+        <button class="btn btn-outline btn-sm" onclick="auditarPresupuestosCongelados()" title="Compara el costo congelado de cada obra aprobada contra lo que daría hoy, y separa cuánto se movió por cambios de receta y cuánto por suba de precios">🔍 Auditar presupuestos congelados</button>
         <button class="btn btn-outline btn-sm" onclick="auditarVencimientosTodasLasObras()" title="Revisa todas las obras aprobadas en busca de garantías, retenciones o cuotas de subcontrato que vencen pronto">📅 Vencimientos (todas las obras)</button>
       </div>
       <div id="excel-import-preview"></div>
@@ -6368,6 +6369,248 @@ function renderAlertasPrecio() {
     </div>`).join('');
 }
 
+// ════════════════════════════════════════════════════════
+// AUDITORÍA DE PRESUPUESTOS CONGELADOS  (14/08/2026)
+//
+// El snapshot congela cd/cdByEtapa/pv y los precios de los insumos, pero NO
+// congela las RECETAS. Como las recetas son globales y sincronizan desde la
+// nube, corregir una receta en el Banco mueve el desglose interno de todas las
+// obras ya aprobadas: cambian las cantidades de material en Compras, los saldos
+// y el monto de venta por rubro de la Certificación al Cliente. El total no se
+// mueve, porque viene del snapshot — por eso pasa desapercibido.
+//
+// Esta auditoría recalcula el costo de cada obra aprobada con las recetas de
+// HOY y lo compara contra el congelado, separando las dos causas:
+//   · con precios congelados  -> cuánto se movió por CAMBIO DE RECETA
+//   · con precios de hoy      -> deriva total (receta + suba de precios)
+// No modifica nada. Solo mide.
+// ════════════════════════════════════════════════════════
+function _precioSnap(snap, clave) {
+  if (!snap || !snap.preciosInsumos) return null;
+  const info = snap.preciosInsumos[clave];
+  return (info && info.precio > 0) ? info.precio : null;
+}
+
+function _costoUnitRubroHoy(cod, tip, snap, congelarPrecios) {
+  const receta = rendimientos[cod];
+  if (!receta) return null;
+  let total = 0;
+  (receta.materiales || []).forEach(item => {
+    const id = (tip === 'superior' && item.idSup && getMaterial(item.idSup)) ? item.idSup : item.id;
+    const m = getMaterial(id); if (!m) return;
+    const vivo = (tip === 'superior' ? m.pSup : m.pBas) || 0;
+    const cong = congelarPrecios ? _precioSnap(snap, 'M:' + id) : null;
+    total += (parseFloat(item.cant) || 0) * ((cong != null) ? cong : vivo);
+  });
+  (receta.mo || []).forEach(item => {
+    const o = getMO(item.id); if (!o) return;
+    const vivo = (tip === 'superior' ? o.pSup : o.pBas) || 0;
+    const cong = congelarPrecios ? _precioSnap(snap, 'MO:' + item.id) : null;
+    total += (parseFloat(item.cant) || 0) * ((cong != null) ? cong : vivo);
+  });
+  return total;
+}
+
+// Recalcula el costo directo de una obra GUARDADA con las recetas de hoy,
+// usando sus propias cantidades. No toca el estado del proyecto abierto.
+function _cdRecalculadoObra(p, congelarPrecios) {
+  const tip   = p.tipologia || 'basico';
+  const snap  = p.snapshotAprobado || null;
+  const cants = p.cantidades   || {};
+  const subs  = p.subcontratos || {};
+  let cd = 0;
+  banco.forEach(row => {
+    const cod  = row[1];
+    const cant = parseFloat(cants[cod] || 0);
+    if (IS_SUB.has(cod)) {
+      const v = subs[cod];
+      if (v !== undefined && v !== '' && v !== null) { cd += parseFloat(v) || 0; return; }
+      if (cant <= 0) return;
+      const catId = SUB_COD_A_CAT[cod];
+      const sc = catId ? subcontratosCat.find(s => s.id === catId) : null;
+      if (!sc) return;
+      const vivo = (tip === 'superior' ? sc.precioRefSup : sc.precioRefBas) || 0;
+      const cong = congelarPrecios ? _precioSnap(snap, 'S:' + catId) : null;
+      cd += cant * ((cong != null) ? cong : vivo);
+      return;
+    }
+    if (cant <= 0) return;
+    const unit = _costoUnitRubroHoy(cod, tip, snap, congelarPrecios);
+    if (unit == null) return;
+    cd += cant * unit;
+  });
+  return cd;
+}
+
+// ════════════════════════════════════════════════════════
+// SELLAR OBRAS APROBADAS  (14/08/2026)
+//
+// Las obras aprobadas antes de que existieran los precios congelados (12/08) y
+// las recetas congeladas (14/08) quedaron abiertas al Banco vivo. Esto les pone
+// la tapa: captura precios y recetas de HOY y los guarda en su snapshot.
+//
+// Limite honesto: los precios y recetas ORIGINALES con los que se aprobaron no
+// existen en ningun lado, no hay de donde sacarlos. Esto no recupera el numero
+// original — frena la deriva de ahora en adelante. Por eso queda marcado con
+// `selladoEl`, para no confundirlo nunca con la fecha de aprobacion.
+//
+// NO toca cd, cdByEtapa ni pv: el costo y el precio pactados no se mueven.
+// ════════════════════════════════════════════════════════
+function _capturarCongeladoParaObra(p) {
+  const tip    = p.tipologia   || 'basico';
+  const cants  = p.cantidades  || {};
+  const adics  = p.adicionales || [];
+  const precios = {};
+  const recetas = {};
+  const usados = new Set();
+  banco.forEach(row => { if (parseFloat(cants[row[1]] || 0) > 0) usados.add(row[1]); });
+  adics.forEach(ad => { if (ad && ad.cod) usados.add(ad.cod); });
+
+  usados.forEach(cod => {
+    if (IS_SUB.has(cod)) {
+      const refCat = SUB_COD_A_CAT[cod] ? subcontratosCat.find(s => s.id === SUB_COD_A_CAT[cod]) : null;
+      if (refCat) {
+        const precio = tip === 'superior' ? refCat.precioRefSup : refCat.precioRefBas;
+        if (precio > 0) precios['S:' + refCat.id] = { precio, label: refCat.nombre || refCat.id };
+      }
+      return;
+    }
+    const receta = rendimientos[cod];
+    if (!receta) return;
+    recetas[cod] = JSON.parse(JSON.stringify(receta));
+    (receta.materiales || []).forEach(item => {
+      const idUse = (tip === 'superior' && item.idSup) ? item.idSup : item.id;
+      const key = 'M:' + idUse;
+      if (precios[key]) return;
+      const m = getMaterial(idUse); if (!m) return;
+      const precio = tip === 'superior' ? m.pSup : m.pBas;
+      if (precio > 0) precios[key] = { precio, label: m.nombre || idUse };
+    });
+    (receta.mo || []).forEach(item => {
+      const key = 'MO:' + item.id;
+      if (precios[key]) return;
+      const o = getMO(item.id); if (!o) return;
+      const precio = tip === 'superior' ? o.pSup : o.pBas;
+      if (precio > 0) precios[key] = { precio, label: o.nombre || item.id };
+    });
+  });
+  return { precios, recetas };
+}
+
+function sellarPresupuestosCongelados() {
+  const guardadas = getProyectosGuardados();
+  const pendientes = Object.keys(guardadas).filter(nombre => {
+    const p = guardadas[nombre];
+    if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return false;
+    const s = p.snapshotAprobado;
+    return !!s && (!s.preciosInsumos || !s.recetas);
+  });
+
+  if (!pendientes.length) { alert('✅ Todas las obras aprobadas ya tienen precios y recetas congelados. No hay nada que sellar.'); return; }
+
+  if (!confirm(
+    'Se van a sellar ' + pendientes.length + ' obra(s):\n\n   • ' + pendientes.join('\n   • ') +
+    '\n\nQué hace: guarda los precios y las recetas de HOY dentro del presupuesto congelado de cada una, ' +
+    'para que futuros cambios del Banco ya no las muevan.\n\n' +
+    'Qué NO hace: no recupera los precios ni las recetas originales de la aprobación — esos ya no existen. ' +
+    'Y no toca el costo ni el precio de venta pactados.\n\n¿Continuar?')) return;
+
+  const hoy = new Date().toISOString();
+  let n = 0;
+  pendientes.forEach(nombre => {
+    const p = guardadas[nombre];
+    const cap = _capturarCongeladoParaObra(p);
+    if (!p.snapshotAprobado.preciosInsumos) p.snapshotAprobado.preciosInsumos = cap.precios;
+    if (!p.snapshotAprobado.recetas)        p.snapshotAprobado.recetas        = cap.recetas;
+    p.snapshotAprobado.selladoEl = hoy;
+    n++;
+  });
+  guardarProyectosGuardados(guardadas);
+
+  // Si la obra abierta es una de las selladas, refrescar su snapshot en memoria
+  const abierta = proyectoActualNombre;
+  if (abierta && pendientes.indexOf(abierta) !== -1 && guardadas[abierta] && guardadas[abierta].snapshotAprobado) {
+    snapshotAprobado = JSON.parse(JSON.stringify(guardadas[abierta].snapshotAprobado));
+    if (typeof recalcular === 'function') recalcular();
+  }
+
+  registrarActividad('Obras selladas (precios y recetas congelados): ' + pendientes.join(', '), '');
+  alert('🔒 Listo. Se sellaron ' + n + ' obra(s).\n\nDe ahora en adelante, cambiar el Banco no mueve ningún número de estas obras. La alerta de suba de precio sigue funcionando.');
+}
+
+function auditarPresupuestosCongelados() {
+  const guardadas = getProyectosGuardados();
+  const nombres = Object.keys(guardadas);
+  if (!nombres.length) { alert('Todavía no guardaste ningún proyecto.'); return; }
+
+  const filas = [];
+  nombres.forEach(nombre => {
+    const p = guardadas[nombre];
+    if (!p) return;
+    const aprobada = (p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado');
+    if (!aprobada) return;
+    const snap = p.snapshotAprobado || null;
+    const cdSnap = snap ? (parseFloat(snap.cd) || 0) : null;
+    const cdReceta = _cdRecalculadoObra(p, true);   // recetas de hoy, precios congelados
+    const cdHoy    = _cdRecalculadoObra(p, false);  // recetas y precios de hoy
+    filas.push({
+      nombre,
+      estado: p.estadoProyecto,
+      fecha: (snap && snap.fecha) ? new Date(snap.fecha).toLocaleDateString('es-PY') : '—',
+      tieneSnap: !!snap,
+      nPrecios: (snap && snap.preciosInsumos) ? Object.keys(snap.preciosInsumos).length : 0,
+      nRecetas: (snap && snap.recetas) ? Object.keys(snap.recetas).length : 0,
+      cdSnap, cdReceta, cdHoy
+    });
+  });
+
+  if (!filas.length) { alert('No hay obras aprobadas o finalizadas guardadas.'); return; }
+
+  const pctTxt = (base, otro) => (base > 0) ? (((otro - base) / base) * 100).toFixed(1) + '%' : '—';
+  let msg = '🔍 AUDITORÍA DE PRESUPUESTOS CONGELADOS\n';
+  msg += 'Obras aprobadas o finalizadas: ' + filas.length + '\n';
+  msg += '════════════════════════════════════════\n\n';
+
+  filas.forEach(f => {
+    msg += '▪ ' + f.nombre + '   (' + f.estado + ', congelado el ' + f.fecha + ')\n';
+    if (!f.tieneSnap) {
+      msg += '   ❌ SIN SNAPSHOT: esta obra figura aprobada pero no tiene presupuesto congelado.\n';
+      msg += '      Todo se recalcula en vivo con el Banco. Costo hoy: ₲ ' + fmtN(Math.round(f.cdHoy)) + '\n\n';
+      return;
+    }
+    msg += '   Costo congelado al aprobar ......... ₲ ' + fmtN(Math.round(f.cdSnap)) + '\n';
+    msg += '   Con las recetas de HOY ............. ₲ ' + fmtN(Math.round(f.cdReceta))
+         + '   (' + pctTxt(f.cdSnap, f.cdReceta) + ')\n';
+    msg += '   Con recetas y precios de HOY ....... ₲ ' + fmtN(Math.round(f.cdHoy))
+         + '   (' + pctTxt(f.cdSnap, f.cdHoy) + ')\n';
+    const derivaReceta = f.cdReceta - f.cdSnap;
+    if (Math.abs(derivaReceta) > 1) {
+      msg += '   ⚠️ La receta cambió después de aprobar: mueve ₲ ' + fmtN(Math.round(derivaReceta))
+           + ' en Compras y en la Certificación al Cliente.\n';
+    } else {
+      msg += '   ✅ Las recetas no se movieron desde la aprobación.\n';
+    }
+    msg += f.nPrecios
+      ? '   ✅ Precios congelados: ' + f.nPrecios + ' insumos.\n'
+      : '   ⚠️ SIN precios congelados: Compras y Adjudicados usan el precio actual del Banco.\n';
+    msg += f.nRecetas
+      ? '   ✅ Recetas congeladas: ' + f.nRecetas + ' rubros.\n\n'
+      : '   ⚠️ SIN recetas congeladas: corregir un rendimiento en el Banco todavía mueve esta obra.\n\n';
+  });
+
+  const aSellar = filas.filter(f => f.tieneSnap && (!f.nPrecios || !f.nRecetas)).length;
+  if (aSellar) {
+    msg += '────────────────────────────────────────\n';
+    msg += '⚠️ ' + aSellar + ' obra(s) con el congelado incompleto.\n';
+    msg += 'Se sellan solas la próxima vez que las abras: no hay que hacer nada.\n';
+  }
+
+  msg += '────────────────────────────────────────\n';
+  msg += 'El TOTAL del presupuesto no cambia: sale del snapshot.\n';
+  msg += 'Lo que se mueve es el desglose por rubro y las cantidades de Compras.';
+  alert(msg);
+}
+
 // Auditoría global: TODAS las obras guardadas, incluida la actual (si ya se guardó)
 function auditarAlertasPrecioTodasLasObras() {
   const guardadas = getProyectosGuardados();
@@ -6835,6 +7078,124 @@ function tipCongelada() {
   if (_forzarPreciosVivos) return null;
   return (snapshotAprobado && snapshotAprobado.preciosInsumos) ? (snapshotAprobado.tipologia || 'basico') : null;
 }
+
+// ════════════════════════════════════════════════════════
+// RECETA VIGENTE DEL PROYECTO  (14/08/2026)
+//
+// Congelar los precios no alcanzaba: la RECETA seguia viva. Como las recetas
+// son globales y bajan de la nube, corregir un rendimiento en el Banco movia
+// las cantidades de material de TODAS las obras ya aprobadas — Compras, saldos,
+// % comprado y el monto por rubro de la Certificacion al Cliente. El total no
+// se movia (sale del snapshot), asi que el desfasaje pasaba desapercibido.
+//
+// Regla: en una obra Aprobada o Finalizada, ningun cambio del Banco puede mover
+// un numero. La suba de precios se avisa con la alerta, y nada mas.
+//
+// Las obras aprobadas antes de esta fecha no tienen recetas congeladas: caen a
+// la receta viva, igual que ya pasaba con los precios. La auditoria las marca.
+// ════════════════════════════════════════════════════════
+// ════════════════════════════════════════════════════════
+// SELLADO AUTOMÁTICO  (14/08/2026)
+//
+// Esto es una REGLA del sistema, no una opción. Cada vez que se abre una obra
+// Aprobada o Finalizada, si su presupuesto congelado no tiene precios, recetas
+// o lista de rubros, se los pone solo con el Banco del momento. Nadie tiene que
+// acordarse de apretar nada.
+//
+// Lo que no puede hacer: recuperar los precios y recetas ORIGINALES de una obra
+// aprobada antes de que esto existiera. Esos no quedaron guardados en ningún
+// lado. Por eso se marca `selladoEl`, para no leerlo nunca como fecha de
+// aprobación, y por eso el Costeo agrega la fila de ajuste (ver renderCosteo):
+// el TOTAL manda, y es el del presupuesto aprobado.
+//
+// Nunca toca cd, cdByEtapa ni pv.
+// ════════════════════════════════════════════════════════
+function autoSellarSnapshot() {
+  if (!snapshotAprobado) return false;
+  if (!(estadoProyecto === 'aprobado' || estadoProyecto === 'finalizado')) return false;
+  const tip = snapshotAprobado.tipologia || document.getElementById('p-tipologia')?.value || 'basico';
+  let cambio = false;
+  if (!snapshotAprobado.preciosInsumos) { snapshotAprobado.preciosInsumos = capturarPreciosInsumosVivos(tip); cambio = true; }
+  if (!snapshotAprobado.recetas)        { snapshotAprobado.recetas        = capturarRecetasVivas();          cambio = true; }
+  if (!snapshotAprobado.filas)          { snapshotAprobado.filas          = capturarFilasPresupuesto(tip);   cambio = true; }
+  if (cambio) {
+    snapshotAprobado.selladoEl = new Date().toISOString();
+    registrarActividad('Presupuesto congelado sellado automáticamente', document.getElementById('p-cliente')?.value || '');
+  }
+  return cambio;
+}
+
+// Lista de rubros vigente del proyecto: la CONGELADA si la obra está aprobada,
+// el Banco vivo si no. Sin esto, borrar un rubro del catálogo lo hacía
+// desaparecer de una obra ya aprobada, y agregar uno nuevo lo metía de prepo.
+function rubrosVigentes(tip) {
+  tip = tip || document.getElementById('p-tipologia')?.value || 'basico';
+  if (!_forzarPreciosVivos && snapshotAprobado && snapshotAprobado.filas) {
+    return snapshotAprobado.filas.map(f => ({
+      cod:f.cod, desc:f.desc, cat:f.cat, unid:f.unid,
+      cant:parseFloat(f.cant)||0, et:f.et, isSub:!!f.isSub,
+      sub:f.sub||0, mat:f.mat||0, mo:f.mo||0, congelada:true
+    }));
+  }
+  return banco.map(row => {
+    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
+    const isSub = IS_SUB.has(cod);
+    return {
+      cod, desc, cat, unid,
+      cant: parseFloat(cantidades[cod] || 0),
+      et: etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3',
+      isSub,
+      sub: isSub ? subTotal(cod, tip) : 0,
+      mat: isSub ? 0 : (tip === 'superior' ? ms  : mb),
+      mo:  isSub ? 0 : (tip === 'superior' ? mos : mob),
+      congelada: false
+    };
+  });
+}
+
+function recetaVigente(cod) {
+  if (!_forzarPreciosVivos && snapshotAprobado && snapshotAprobado.recetas) {
+    const r = snapshotAprobado.recetas[cod];
+    if (r) return r;
+  }
+  return rendimientos[cod];
+}
+
+// Captura la LISTA DE RUBROS del presupuesto con su costo unitario ya resuelto.
+// Sin esto, borrar o renombrar un rubro en el Banco hacía desaparecer la fila de
+// una obra aprobada. La obra pasa a tener su propia lista, independiente del
+// catálogo: agregar, modificar o borrar rubros del Banco ya no la toca.
+function capturarFilasPresupuesto(tip) {
+  const filas = [];
+  banco.forEach(row => {
+    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
+    const isSub = IS_SUB.has(cod);
+    const cant  = parseFloat(cantidades[cod] || 0);
+    const sub   = isSub ? subTotal(cod, tip) : 0;
+    if (cant <= 0 && !(isSub && sub > 0)) return;
+    filas.push({
+      cat, cod, desc, unid,
+      mat: isSub ? 0 : (tip === 'superior' ? ms  : mb),
+      mo:  isSub ? 0 : (tip === 'superior' ? mos : mob),
+      sub, cant, isSub,
+      et: etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3'
+    });
+  });
+  return filas;
+}
+
+// Captura las recetas de los rubros que forman parte del presupuesto, al aprobar
+function capturarRecetasVivas() {
+  const out = {};
+  const usados = new Set();
+  banco.forEach(row => { if (parseFloat(cantidades[row[1]] || 0) > 0) usados.add(row[1]); });
+  (adicionales || []).forEach(ad => { if (ad && ad.cod) usados.add(ad.cod); });
+  usados.forEach(cod => {
+    const r = rendimientos[cod];
+    if (r) out[cod] = JSON.parse(JSON.stringify(r));
+  });
+  return out;
+}
 function precioMatVigente(id, tip) {
   const m = getMaterial(id);
   const vivo = m ? (tip === 'superior' ? m.pSup : m.pBas) : 0;
@@ -6884,7 +7245,7 @@ function tieneReceta(cod) {
 
 function recalcularBancoDesdeRecetas() {
   Object.keys(rendimientos).forEach(cod => {
-    const receta = rendimientos[cod];
+    const receta = recetaVigente(cod);
     const idx = banco.findIndex(r => r[1] === cod);
     if (idx === -1) return;
 
@@ -7001,28 +7362,10 @@ function calcular() {
     }
   });
 
-  // ── ÍTEMS MANUALES (FIX ago2026) ────────────────────────────────────────
-  // Lo que se compra fuera del catálogo (Seguimiento → Compras → "ítem manual")
-  // ya salía del Flujo de Caja como egreso real, pero NUNCA entraba al cd. La
-  // bolsa Obra se vaciaba sin haberse llenado nunca y la rentabilidad del
-  // Dashboard salía inflada, porque el costo real era mayor que el cd mostrado.
-  //
-  // Criterio (igual que la Corrección de Cómputo): suma al COSTO interno, no al
-  // precio de venta. Por eso se acumula aparte y se descuenta del cd que arma el
-  // pv más abajo: lo que se le cobra al cliente es lo pactado, pase lo que pase.
-  let cdItemsManuales = 0;
-  (itemsManuales || []).forEach(it => {
-    if (!it || !it.tipo) return;
-    const cantIM   = parseFloat(it.cant   || 0) || 0;
-    const precioIM = parseFloat(it.precio || 0) || 0;
-    const costo = cantIM * precioIM;
-    if (costo <= 0) return;
-    const et = it.etapa || 'C1';
-    if (cdByEtapa[et] === undefined) cdByEtapa[et] = 0;
-    cd += costo;
-    cdByEtapa[et] += costo;
-    cdItemsManuales += costo;
-  });
+  // Nota (ago2026): los ítems manuales de Compras NO entran acá. Son gasto real
+  // de ejecución y se ven en el Flujo de Caja como salida de la bolsa Obra, no
+  // como costo presupuestado. Mezclarlos con el cd hacía que el mismo gasto se
+  // "cargara" y se "usara" a la vez, y el número dejaba de significar algo.
 
   const cobroExtraTotal = Object.values(cobroExtraAdicionalesByEtapa).reduce((a,b)=>a+b,0);
 
@@ -7036,12 +7379,10 @@ function calcular() {
 
   // pv (Precio de Venta) congelado si el proyecto está aprobado: la corrección de cómputo
   // NO debe inflar/reducir lo que ya se le cobra al cliente, solo tu costo interno.
-  // Los ítems manuales tampoco inflan el pv: son costo de ejecución, no venta nueva.
-  // Por eso se restan del cd acá (y solo acá). El cd que se devuelve sí los incluye.
-  const pv = (pvCongelado !== null) ? pvCongelado : (cd - cdItemsManuales) * (1 + idx);
+  const pv = (pvCongelado !== null) ? pvCongelado : cd * (1 + idx);
   const pf = pv + gaExtra - desc + cobroExtraTotal;
 
-  return { cd, cdByEtapa, idx, pv, pf, gd, gi, iva, util, cdAdicionalesCorreccion, cdItemsManuales, cobroExtraAdicionalesByEtapa, cobroExtraTotal };
+  return { cd, cdByEtapa, idx, pv, pf, gd, gi, iva, util, cdAdicionalesCorreccion, cobroExtraAdicionalesByEtapa, cobroExtraTotal };
 }
 
 // ════════════════════════════════════════════════════════
@@ -7057,6 +7398,9 @@ function recalcular() {
   document.getElementById('res-pv').textContent  = fmt(pv);
   document.getElementById('res-pf').textContent  = fmt(pf);
   document.getElementById('res-ant').textContent = fmt(pf * etapasPct.C1 / 100);
+  // El rótulo decía "Anticipo 35%" fijo aunque la forma de pago fuera otra
+  const _antLbl = document.getElementById('res-ant-lbl');
+  if (_antLbl) _antLbl.textContent = 'Anticipo ' + (etapasPct.C1 || 0) + '%';
 
   // Update etapas de pago
   document.getElementById('ep-cd').textContent  = fmt(cd);
@@ -7183,8 +7527,36 @@ function renderCosteo() {
     </tr>`;
   });
 
-  const totCD = totMat + totMO + totSub;
+  let totCD = totMat + totMO + totSub;
+
+  // ── AJUSTE AL PRESUPUESTO APROBADO (14/08/2026) ──────────────────────────
+  // En una obra congelada manda el TOTAL del presupuesto aprobado, no lo que dé
+  // el Banco de hoy. Si no coinciden, es porque esa obra se aprobó antes de que
+  // se congelaran precios y recetas, y el catálogo se movió después. La fila de
+  // ajuste cierra la diferencia para que la tabla sume exactamente lo mismo que
+  // la caja COSTO DIRECTO. En obras aprobadas de acá en adelante da 0 siempre.
+  let filaAjuste = '';
+  if (congelado) {
+    const cdOficial = calcular().cd;
+    const ajuste = cdOficial - totCD;
+    if (Math.abs(ajuste) >= 1) {
+      filaAjuste = `<tr style="background:#FFF8E1">
+        <td colspan="7" style="padding:8px 10px;font-size:12px;color:#8D6E63;text-align:right">
+          <strong>Ajuste al presupuesto aprobado</strong>
+          <span title="Diferencia entre el costo con el que se aprobó esta obra y lo que da el Banco actual. Aparece solo en obras aprobadas antes de que se congelaran precios y recetas." style="cursor:help">ⓘ</span>
+        </td>
+        <td class="num" style="color:#8D6E63">—</td>
+        <td class="num" style="color:#8D6E63">—</td>
+        <td class="num" style="color:#8D6E63">—</td>
+        <td class="num" style="font-weight:700;color:#8D6E63;padding:8px 10px">${fmtN(Math.round(ajuste))}</td>
+        <td></td>
+      </tr>`;
+      totCD = cdOficial;
+    }
+  }
+
   html += `</tbody><tfoot>
+    ${filaAjuste}
     <tr style="background:var(--verdel)">
       <td colspan="7" style="padding:10px;font-weight:700;text-align:right">TOTALES</td>
       <td class="num" style="font-weight:700;color:#1565C0;padding:10px">${fmtN(totMat)}</td>
@@ -8388,7 +8760,7 @@ function jornalesPorCategoria(cat) {
     if (IS_SUB.has(cod)) return; // los subcontratos no consumen tu propia cuadrilla
     const cant = parseFloat(cantidades[cod] || 0);
     if (cant <= 0) return;
-    const receta = rendimientos[cod];
+    const receta = recetaVigente(cod);
     if (!receta) return;
     (receta.mo || []).forEach(item => { total += item.cant * cant; });
   });
@@ -9475,7 +9847,7 @@ function pctCompradoRubro(cod, et, tip, necesidadesEtapa) {
     return Math.min(100, Math.round(gastado / costoRubro * 100));
   }
   if (cant <= 0) return null;
-  const receta = rendimientos[cod];
+  const receta = recetaVigente(cod);
   if (!receta) return null;
   return pctCompradoDeReceta(receta, cant, et, tip, necesidadesEtapa, '');
 }
@@ -9490,7 +9862,7 @@ function pctCompradoAdicional(ad, et, tip, necesidadesEtapa) {
     const gastado = gastoRealEjec('sub:'+ad.cod+'#adic:'+ad.id+'@'+et, cant > 0 ? costoRubro / cant : costoRubro);
     return Math.min(100, Math.round(gastado / costoRubro * 100));
   }
-  const receta = rendimientos[ad.cod];
+  const receta = recetaVigente(ad.cod);
   if (!receta) return null;
   const cant = parseFloat(ad.cant) || 0;
   if (cant <= 0) return null;
@@ -9767,21 +10139,20 @@ function calcularNecesidades() {
   const tip = document.getElementById('p-tipologia')?.value || 'basico';
   const etapas = { C1:{mat:{},mo:{},sub:[]}, C2:{mat:{},mo:{},sub:[]}, C3:{mat:{},mo:{},sub:[]}, R:{mat:{},mo:{},sub:[]} };
 
-  banco.forEach(row => {
-    const [cat, cod, desc] = row;
-    const cant = parseFloat(cantidades[cod] || 0);
-    const et = etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3';
+  rubrosVigentes(tip).forEach(r => {
+    const cod = r.cod, desc = r.desc;
+    const cant = r.cant;
+    const et = r.et || 'C3';
     const bucket = etapas[et] || etapas.C3;
 
-    if (IS_SUB.has(cod)) {
-      const sub = subTotal(cod, tip);
-      if (sub > 0 || cant > 0) {
-        bucket.sub.push({ cod, desc, cant, costo: sub });
+    if (r.isSub) {
+      if (r.sub > 0 || cant > 0) {
+        bucket.sub.push({ cod, desc, cant, costo: r.sub });
       }
       return;
     }
     if (cant <= 0) return;
-    const receta = rendimientos[cod];
+    const receta = recetaVigente(cod);
     if (!receta) return;
 
     (receta.materiales || []).forEach(item => {
@@ -9820,7 +10191,7 @@ function calcularNecesidades() {
       bucket.sub.push({ cod:ad.cod+sufijo, desc:'➕ '+(bancoRow?bancoRow[2]:ad.cod)+' (adicional)', cant, costo:cant*(mat+mo), adic:true });
       return;
     }
-    const receta = rendimientos[ad.cod];
+    const receta = recetaVigente(ad.cod);
     if (!receta) return;
     (receta.materiales || []).forEach(item => {
       const id = (tip==='superior'&&item.idSup)?item.idSup:item.id;
@@ -10750,7 +11121,7 @@ function necesidadMaterialesPorCategoria(categoria, et) {
     if (cant <= 0) return;
     const rEt = etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3';
     if (rEt !== et) return;
-    const receta = rendimientos[cod];
+    const receta = recetaVigente(cod);
     if (!receta) return;
     (receta.materiales || []).forEach(item => {
       const id = (tip === 'superior' && item.idSup) ? item.idSup : item.id;
@@ -10936,7 +11307,7 @@ function desgloseMaterialPorRubro(matKey, et){
       if (cant <= 0) return;
       // et vacío o 'todas' = sin filtro (Adjudicados agrega todas las etapas)
       if (et && et!=='todas' && (etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3') !== et) return;
-      const receta = rendimientos[cod];
+      const receta = recetaVigente(cod);
       if (!receta) return;
       (receta.materiales||[]).forEach(item => {
         if(!item) return;
@@ -10949,7 +11320,7 @@ function desgloseMaterialPorRubro(matKey, et){
     const adId = matKey.split('#adic:')[1];
     (adicionales||[]).filter(a=>a&&a.tipo==='cliente'&&a.cod&&String(a.id)===String(adId)).forEach(ad=>{
       const cant = parseFloat(ad.cant)||0;
-      const receta = rendimientos[ad.cod]; if(!receta) return;
+      const receta = recetaVigente(ad.cod); if(!receta) return;
       const bRow = (typeof getBancoRow==='function') ? getBancoRow(ad.cod) : null;
       (receta.materiales||[]).forEach(item=>{
         if(!item) return;
@@ -12246,6 +12617,26 @@ function egresosPorEtapa() {
     if (gasto) eg[et] += gasto;
   });
 
+  // ── ÍTEMS FUERA DE CATÁLOGO SIN LOTES (FIX ago2026) ─────────────────────
+  // El panel de ítems manuales se usa para anotar plata que YA salió: alquiler
+  // de andamio, flete, una changa puntual. Pero el sistema lo leía como "esto
+  // lo voy a gastar" y esperaba además que se registrara la compra abajo. Si no
+  // se registraba, el gasto quedaba cargado y no salía por ningún lado.
+  //
+  // Ahora, si el ítem no tiene ninguna compra registrada, su monto declarado
+  // (cantidad × precio) ES el egreso. Si después se le cargan lotes, mandan los
+  // lotes y esto no suma: ese gasto ya vino contado más arriba.
+  (itemsManuales || []).forEach(it => {
+    if (!it || !it.tipo) return;
+    const et = it.etapa || 'C1';
+    if (eg[et] === undefined) return;
+    const ekeyIM = it.tipo + ':manual#' + it.id + '@' + et;
+    const e = ejecucion[ekeyIM];
+    if (e && e.lotes && e.lotes.length) return;   // ya contado como compra real
+    const monto = (parseFloat(it.cant) || 0) * (parseFloat(it.precio) || 0);
+    if (monto > 0) eg[et] += monto;
+  });
+
   // Adelantos sin amortizar: plata entregada sin trabajo ejecutado. Lo ya
   // amortizado NO se suma acá, porque viene contado dentro de los lotes.
   if (typeof saldoAdelantosPorEtapa === 'function') {
@@ -12290,7 +12681,7 @@ function renderFlujo() {
   const container = document.getElementById('flujo-container');
   if (!container) return;
   const c = calcular();
-  const { pf, cd, cdByEtapa, gd, gi, iva, util, cdItemsManuales, cobroExtraAdicionalesByEtapa, cobroExtraTotal } = c;
+  const { pf, cd, cdByEtapa, gd, gi, iva, util, cobroExtraAdicionalesByEtapa, cobroExtraTotal } = c;
   const eg = egresosPorEtapa();                       // egresos reales a proveedores por etapa
   const ET = ['C1','C2','C3','R'];
   const ET_LBL = { C1:'C1 — Anticipo', C2:'C2 — Avance', C3:'C3 — Avance', R:'Retención' };
@@ -12305,25 +12696,44 @@ function renderFlujo() {
   const cargado = { Obra:0, GD:0, GI:0, IVA:0, Utilidad:0 };   // lo que entra a cada bolsa desde el cobro real
   const porEtapa = {};                                          // et -> {buckets..., previsto, cobrado, costoEtapa, margenEtapa}
 
+  // ── REPARTO POR BOLSA (FIX ago2026) ─────────────────────────────────────
+  // Antes la bolsa Obra se cargaba con el COSTO PRESUPUESTADO de la etapa y la
+  // Utilidad se quedaba con el residuo (previsto − costo − GD − GI − IVA).
+  // Con un plan de pago 35/35/25/5 y un costo que no sigue ese mismo ritmo, el
+  // desfasaje de calendario caía entero sobre la Utilidad y la hundía a números
+  // negativos aunque la obra fuera rentable. El número no significaba nada.
+  //
+  // Ahora hace lo que el cartel de la tabla siempre prometió: cada guaraní
+  // COBRADO se parte en las 5 bolsas según el índice de venta. Con índice 50
+  // (GD5 + GI5 + IVA10 + Util30) sobre un costo base 100, el factor es 1,5:
+  //   Obra 66,67% · GD 3,33% · GI 3,33% · IVA 6,67% · Utilidad 20% = 100%
+  // Cada bolsa se llena con su parte y se vacía con sus gastos. Si una queda en
+  // rojo, es porque se gastó de esa bolsa más de lo que la obra le aportó — que
+  // es justamente lo que hay que ver.
+  const factorIdx = 1 + (gd + gi + iva + util) / 100;
+  const SHARE = {
+    Obra:      1              / factorIdx,
+    GD:       (gd   / 100)    / factorIdx,
+    GI:       (gi   / 100)    / factorIdx,
+    IVA:      (iva  / 100)    / factorIdx,
+    Utilidad: (util / 100)    / factorIdx,
+  };
+
   ET.forEach(et => {
     const pp = plan[et] || 0;
     const cobroExtra = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
     const previsto = baseSinAdic * pp / 100 + cobroExtra;     // = Cobro de Liquidez/Oferta (con tu %)
     const cobrado  = cobrosReales[et] || 0;
-    const f = previsto > 0 ? cobrado / previsto : 0;           // fracción del previsto realmente cobrada
 
-    const costoEtapa  = cdByEtapa[et] || 0;                    // costo REAL de la etapa (= Costo de Liquidez)
+    const costoEtapa  = cdByEtapa[et] || 0;                    // costo presupuestado (= Costo de Liquidez)
     const margenEtapa = previsto - costoEtapa;                 // = Margen de Liquidez
 
-    // bolsas (sobre el cobro real): obra recupera el costo; lo que sobra se reserva/utilidad
-    const gdF  = costoEtapa * gd  / 100;
-    const giF  = costoEtapa * gi  / 100;
-    const ivaF = costoEtapa * iva / 100;
-    const utilF = previsto - costoEtapa - gdF - giF - ivaF;
-    const obraEt = costoEtapa*f, gdEt = gdF*f, giEt = giF*f, ivaEt = ivaF*f, utilEt = utilF*f;
-
-    porEtapa[et] = { Obra:obraEt, GD:gdEt, GI:giEt, IVA:ivaEt, Utilidad:utilEt, previsto, cobrado, costoEtapa, margenEtapa };
-    cargado.Obra += obraEt; cargado.GD += gdEt; cargado.GI += giEt; cargado.IVA += ivaEt; cargado.Utilidad += utilEt;
+    porEtapa[et] = { previsto, cobrado, costoEtapa, margenEtapa };
+    BOLSAS.forEach(b => {
+      const parte = cobrado * SHARE[b];
+      porEtapa[et][b] = parte;
+      cargado[b] += parte;
+    });
   });
 
   // ── Movimientos manuales agregados por bolsa (CD/CO viejos => Obra) ──
@@ -12356,14 +12766,45 @@ function renderFlujo() {
     </tr>`;
   });
 
-  // ── TABLA 2: Descomposición del cobro por bolsa (por etapa) ──
+  // ── TABLA 2: por etapa y bolsa — ingreso, salida y saldo ──
+  // Antes solo mostraba el INGRESO por bolsa. Faltaba lo más importante para
+  // manejar la obra: cuánto salió de cada bolsa EN CADA ETAPA. El costo real
+  // aparecía como un total y no había forma de saber cuánto era de C1 y cuánto
+  // de C2. Las salidas de Obra salen solas de Compras; las demás, de los
+  // movimientos manuales, imputadas a la etapa que se les cargó.
+  const salidaEt = {};
+  ET.forEach(et => { salidaEt[et] = { Obra: eg[et] || 0, GD:0, GI:0, IVA:0, Utilidad:0 }; });
+  (movimientos || []).forEach(m => {
+    const r = normRec(m.recurso);
+    const et = m.etapa || 'C1';
+    if (!salidaEt[et] || salidaEt[et][r] === undefined) return;
+    salidaEt[et][r] += -(m.monto || 0);   // salida suma, entrada manual resta
+  });
+
   let filasB = '';
   ET.forEach(et => {
     const d = porEtapa[et];
-    const hab = d.cobrado > 0;
-    filasB += `<tr style="border-bottom:1px solid #f0f0f0;${hab?'':'opacity:0.55'}">
-      <td style="padding:6px 10px;font-weight:600">${hab?'🟢':'⚪'} ${et}</td>
+    const salidaTot = BOLSAS.reduce((a,b)=>a+salidaEt[et][b],0);
+    const hab = d.cobrado > 0 || Math.abs(salidaTot) > 0.5;
+    if (!hab) {
+      filasB += `<tr style="opacity:0.45;border-bottom:1px solid #f0f0f0">
+        <td style="padding:6px 10px;font-weight:600">⚪ ${et}</td><td style="font-size:11px;color:#999">sin movimiento</td>
+        ${BOLSAS.map(()=>`<td class="num">—</td>`).join('')}</tr>`;
+      return;
+    }
+    filasB += `<tr style="border-top:2px solid #e8e8e8">
+      <td rowspan="3" style="padding:6px 10px;font-weight:700;vertical-align:middle;background:#FAFAFA">🟢 ${et}
+        <div style="font-size:10px;color:#999;font-weight:400">cobrado<br>${fmtN(Math.round(d.cobrado))}</div></td>
+      <td style="font-size:11px;color:#2E7D32;font-weight:600;padding:4px 8px">Ingreso</td>
       ${BOLSAS.map(b=>`<td class="num" style="color:${COL[b]}">${d[b]?fmtN(Math.round(d[b])):'—'}</td>`).join('')}
+    </tr>
+    <tr>
+      <td style="font-size:11px;color:#C05000;font-weight:600;padding:4px 8px">Salida</td>
+      ${BOLSAS.map(b=>`<td class="num" style="color:#C05000">${salidaEt[et][b]?fmtN(Math.round(salidaEt[et][b])):'—'}</td>`).join('')}
+    </tr>
+    <tr style="border-bottom:1px solid #f0f0f0;background:#FCFCFC">
+      <td style="font-size:11px;font-weight:700;padding:4px 8px">Saldo</td>
+      ${BOLSAS.map(b=>{const s=d[b]-salidaEt[et][b];return `<td class="num" style="font-weight:700;color:${s>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(s))}</td>`;}).join('')}
     </tr>`;
   });
 
@@ -12399,6 +12840,36 @@ function renderFlujo() {
     </tr>`;
   });
 
+  // ── Utilidad por etapa: lo generado por cada cobro contra lo que se retiró ──
+  // La utilidad no es plata que aparece al firmar: se gana a medida que se cobra.
+  // Cada etapa aporta su porcentaje del índice sobre lo cobrado EN ESA etapa, y
+  // el retiro se imputa a la etapa elegida en el movimiento manual.
+  const utilOutEt = { C1:0, C2:0, C3:0, R:0 };
+  (movimientos || []).forEach(m => {
+    if (normRec(m.recurso) !== 'Utilidad') return;
+    const e = m.etapa || 'C1';
+    if (utilOutEt[e] === undefined) return;
+    utilOutEt[e] += (m.monto < 0) ? -m.monto : -m.monto;   // entrada a Utilidad = retiro negativo
+  });
+  const utilOutTot = ET.reduce((a,e)=>a+utilOutEt[e],0);
+  let filasUtil = '';
+  ET.forEach(et => {
+    const d = porEtapa[et];
+    const gen = d.Utilidad, ret = utilOutEt[et], saldo = gen - ret;
+    if (!d.cobrado && !ret) {
+      filasUtil += `<tr style="opacity:0.5"><td style="padding:6px 10px;font-weight:600">⚪ ${et}</td>
+        <td class="num">—</td><td class="num">—</td><td class="num">—</td><td class="num">—</td></tr>`;
+      return;
+    }
+    filasUtil += `<tr style="border-bottom:1px solid #f0f0f0">
+      <td style="padding:6px 10px;font-weight:600">🟢 ${et}</td>
+      <td class="num" style="color:#2E7D32">${fmtN(Math.round(d.cobrado))}</td>
+      <td class="num" style="color:#1565C0;font-weight:600">${fmtN(Math.round(gen))}</td>
+      <td class="num" style="color:#C05000">${ret?fmtN(Math.round(ret)):'—'}</td>
+      <td class="num" style="font-weight:700;color:${saldo>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(saldo))}</td>
+    </tr>`;
+  });
+
   // Resumen
   const utilDisp = cargado.Utilidad + manIn.Utilidad - manOut.Utilidad;
   const cajaDisp = tCob + (manIn.Obra+manIn.GD+manIn.GI+manIn.IVA+manIn.Utilidad)
@@ -12415,22 +12886,47 @@ function renderFlujo() {
     <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Cobro, Costo y Margen son los mismos que la tabla de Liquidez (con tu % de etapa y el costo real de cada etapa). Cargá el Cobrado real para alimentar las bolsas de abajo. 🟢 etapa con cobro · ⚪ pendiente.</div>
   </div></div>
 
-  <div class="card"><div class="card-header accent">📊 Descomposición del cobro por bolsa</div>
+  <div class="card"><div class="card-header accent">📊 Por etapa y bolsa — ingreso, salida y saldo</div>
   <div class="card-body" style="padding:0;overflow-x:auto">
-    <table class="tbl"><thead><tr><th>Etapa</th>${BOLSAS.map(b=>`<th class="num">${LBL[b]}</th>`).join('')}</tr></thead>
+    <table class="tbl"><thead><tr><th>Etapa</th><th></th>${BOLSAS.map(b=>`<th class="num">${LBL[b]}<br><span style="font-weight:400;font-size:10px;opacity:0.85">${(SHARE[b]*100).toFixed(2)}%</span></th>`).join('')}</tr></thead>
     <tbody>${filasB}
-    <tr style="background:#E8F0E5;font-weight:700;border-top:2px solid #4A6741"><td style="padding:8px 10px">CARGADO</td>${BOLSAS.map(b=>`<td class="num" style="color:${COL[b]}">${fmtN(Math.round(cargado[b]))}</td>`).join('')}</tr>
+    <tr style="background:#E8F0E5;font-weight:700;border-top:2px solid #4A6741"><td style="padding:8px 10px">TOTAL</td><td style="font-size:11px;color:#2E7D32">Ingreso</td>${BOLSAS.map(b=>`<td class="num" style="color:${COL[b]}">${fmtN(Math.round(cargado[b]))}</td>`).join('')}</tr>
+    <tr style="background:#E8F0E5;font-weight:700"><td></td><td style="font-size:11px;color:#C05000">Salida</td>${BOLSAS.map(b=>{const t=ET.reduce((a,e)=>a+salidaEt[e][b],0);return `<td class="num" style="color:#C05000">${t?fmtN(Math.round(t)):'—'}</td>`;}).join('')}</tr>
+    <tr style="background:#DCEBD6;font-weight:700;border-bottom:2px solid #4A6741"><td></td><td style="font-size:11px">Saldo</td>${BOLSAS.map(b=>{const t=cargado[b]-ET.reduce((a,e)=>a+salidaEt[e][b],0);return `<td class="num" style="color:${t>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(t))}</td>`;}).join('')}</tr>
     </tbody></table>
-    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Cada guaraní cobrado se reparte en las 5 bolsas según el índice de venta. Descuento y gasto extra se aplican a Utilidad.</div>
+    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Cada guaraní <strong>cobrado</strong> se parte en las 5 bolsas según el índice de venta (${(gd+gi+iva+util).toFixed(0)}% sobre costo → factor ${factorIdx.toFixed(2)}). Los porcentajes suman 100%: nada se pierde ni se inventa. Una etapa sin cobrar no reparte nada.<br><strong>Salida</strong> de Costo Obra sale sola de Compras, según la etapa de cada compra. Las demás salen de los movimientos manuales, imputadas a la etapa que les cargaste ahí.</div>
   </div></div>
 
   <div class="card"><div class="card-header" style="background:#4A6741">👛 Bolsas — saldo disponible</div>
   <div class="card-body" style="padding:0;overflow-x:auto">
-    <table class="tbl"><thead><tr><th>Bolsa</th><th class="num">Cargado (del cobro)</th><th class="num">Entradas manuales</th><th class="num">Usado</th><th class="num">Disponible</th></tr></thead>
+    <table class="tbl"><thead><tr><th>Bolsa</th><th class="num">Ingreso (del cobro)</th><th class="num">Entradas manuales</th><th class="num">Salidas</th><th class="num">Saldo</th></tr></thead>
     <tbody>${filasC}
     <tr style="background:#E8F0E5;font-weight:700;border-top:2px solid #4A6741"><td style="padding:8px 10px">TOTAL</td><td class="num">${fmtN(Math.round(tCar))}</td><td class="num" style="color:#2E7D32">${fmtN(Math.round(tIn))}</td><td class="num" style="color:#C05000">${fmtN(Math.round(tUso))}</td><td class="num" style="color:${tDisp>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(tDisp))}</td></tr>
     </tbody></table>
-    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Usado de Obra = pagos reales a proveedores (₲ ${fmtN(Math.round(egProveedores))}, automático desde Compras/Adjudicados) + salidas manuales de Obra. IVA es reserva para Hacienda — no es plata a repartir.${(cdItemsManuales>0)?`<br><span style="color:#C05000;font-weight:600">✋ Incluye ₲ ${fmtN(Math.round(cdItemsManuales))} de ítems fuera del catálogo</span> — suman al costo de obra de su etapa, no al precio de venta pactado.`:''}</div>
+    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">
+      <strong>Ingreso</strong> = la parte del cobro que le toca a esa bolsa. <strong>Salidas</strong> = lo que ya se gastó de ella. <strong>Saldo</strong> = lo que queda.<br>
+      · <strong style="color:#4A6741">Costo Obra</strong>: sale solo, con lo que registrás en Compras — materiales, mano de obra, subcontratos, ítems fuera de catálogo y adelantos (₲ ${fmtN(Math.round(egProveedores))}). No hace falta cargarlo a mano. Un ítem fuera de catálogo cuenta por su monto declarado; si además le registrás la compra, manda la compra.<br>
+      · <strong style="color:#C05000">GD · GI · IVA · Utilidad</strong>: se descargan con los movimientos manuales de abajo (combustible, fletes, oficina, el IVA que pagás a Hacienda, los retiros de ganancia).<br>
+      · Una bolsa <strong style="color:#C00000">en rojo</strong> significa que gastaste de ahí más de lo que la obra te aportó hasta hoy.
+    </div>
+  </div></div>
+
+  <div class="card"><div class="card-header" style="background:#1565C0">💰 Utilidad por etapa — cuánto se generó y cuánto se retiró</div>
+  <div class="card-body" style="padding:0;overflow-x:auto">
+    <table class="tbl"><thead><tr><th>Etapa</th><th class="num">Cobrado</th><th class="num">Utilidad generada (${(SHARE.Utilidad*100).toFixed(2)}%)</th><th class="num">Retirado</th><th class="num">Saldo a repartir</th></tr></thead>
+    <tbody>${filasUtil}
+    <tr style="background:#E8F0E5;font-weight:700;border-top:2px solid #1565C0">
+      <td style="padding:8px 10px">TOTAL</td>
+      <td class="num">${fmtN(Math.round(tCob))}</td>
+      <td class="num" style="color:#1565C0">${fmtN(Math.round(cargado.Utilidad))}</td>
+      <td class="num" style="color:#C05000">${fmtN(Math.round(utilOutTot))}</td>
+      <td class="num" style="color:${(cargado.Utilidad-utilOutTot)>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(cargado.Utilidad - utilOutTot))}</td>
+    </tr>
+    </tbody></table>
+    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">
+      La utilidad se gana a medida que se cobra: cada etapa aporta el ${(SHARE.Utilidad*100).toFixed(2)}% de lo que cobraste en ella.
+      El retiro se imputa a la etapa que elegiste en el movimiento manual — si cargaste un retiro en la etapa equivocada, cambiá la columna Etapa abajo y esta tabla se acomoda.
+    </div>
   </div></div>
 
   <div class="card"><div class="card-header" style="background:#555">➕ Movimientos manuales — gastos que NO son de obra (GD · GI · IVA · Utilidad)
@@ -15880,6 +16376,8 @@ function cambiarEstadoProyecto(nuevoEstado) {
       pv: r.pv,
       tipologia: tipAprob,
       preciosInsumos: capturarPreciosInsumosVivos(tipAprob),
+      recetas: capturarRecetasVivas(),            // 14/08/2026 — el Banco ya no mueve cantidades de una obra aprobada
+      filas:   capturarFilasPresupuesto(tipAprob), // ni agregando, modificando o borrando rubros
       fecha: new Date().toISOString(),
       adicionales: JSON.parse(JSON.stringify(adicionales)),
       // Plan de pago congelado: la forma de pago pactada (%) + descuento/gastos extra quedan fijos.
@@ -17051,6 +17549,9 @@ function aplicarProyectoSerializado(data) {
   vencimientos     = data.vencimientos ? JSON.parse(JSON.stringify(data.vencimientos)) : { actaEntrega:'', subcontratos:{} };
   hitos            = data.hitos ? JSON.parse(JSON.stringify(data.hitos)) : [];
   cortesAdmin      = data.cortesAdmin ? JSON.parse(JSON.stringify(data.cortesAdmin)) : [];
+
+  // REGLA: una obra aprobada se sella sola al abrirse. Ver autoSellarSnapshot().
+  if (autoSellarSnapshot() && typeof autosaveSeguimiento === 'function') autosaveSeguimiento();
 
   actualizarProyecto();
   renderEstadoProyecto();
