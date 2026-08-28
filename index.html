@@ -1147,6 +1147,7 @@
         <button class="btn btn-outline btn-sm" onclick="auditarHuerfanasTodasLasObras()" title="Revisa todas las obras guardadas en busca de compras registradas de ítems ya eliminados">🔍 Auditar compras huérfanas (todas las obras)</button>
         <button class="btn btn-outline btn-sm" onclick="auditarAlertasPrecioTodasLasObras()" title="Revisa todas las obras aprobadas en busca de rubros del Banco que subieron más de 15% desde la aprobación">📈 Alertas de suba de precio (todas las obras)</button>
         <button class="btn btn-outline btn-sm" onclick="auditarPresupuestosCongelados()" title="Compara el costo congelado de cada obra aprobada contra lo que daría hoy, y separa cuánto se movió por cambios de receta y cuánto por suba de precios">🔍 Auditar presupuestos congelados</button>
+        <button class="btn btn-outline btn-sm" style="border-color:#4A6741;color:#4A6741;font-weight:600" onclick="sellarPresupuestosCongelados()" title="Guarda precios, recetas y lista de rubros de HOY dentro de cada obra aprobada que todavía no los tenga, para que el Banco deje de moverles números. No toca el costo ni el precio pactados.">🔒 Sellar obras aprobadas</button>
         <button class="btn btn-outline btn-sm" onclick="auditarVencimientosTodasLasObras()" title="Revisa todas las obras aprobadas en busca de garantías, retenciones o cuotas de subcontrato que vencen pronto">📅 Vencimientos (todas las obras)</button>
       </div>
       <div id="excel-import-preview"></div>
@@ -1809,7 +1810,8 @@ async function axoLogin(){
     document.getElementById('axo-login').style.display = 'none';
     aplicarRolUsuario(email);
     if(typeof flushPendientesAntesDeBajar==='function') await flushPendientesAntesDeBajar();
-    await sincronizarDesdeNube();
+    const _okSync = await sincronizarDesdeNube();
+    if(typeof mantenimientoAutomaticoAXO==='function') mantenimientoAutomaticoAXO({ conNube: _okSync !== false });
   }catch(e){ msg.style.color = '#C00'; msg.textContent = 'Error al ingresar. Proba de nuevo.'; }
 }
 
@@ -1826,7 +1828,9 @@ async function axoCheckSesion(){
       const l=document.getElementById('axo-login'); if(l) l.style.display='none';
       aplicarRolUsuario(data.session.user ? data.session.user.email : '');
       if(typeof flushPendientesAntesDeBajar==='function') await flushPendientesAntesDeBajar();
-      await sincronizarDesdeNube();
+      const _okSync = await sincronizarDesdeNube();
+      // Mantenimiento automático: sella obras aprobadas y repara el Banco si hace falta
+      if(typeof mantenimientoAutomaticoAXO==='function') mantenimientoAutomaticoAXO({ conNube: _okSync !== false });
       chequearEspacioAuto();
     }
   }catch(e){}
@@ -5772,8 +5776,50 @@ function migrarRecetasBolsaKg(){
   return _migracionRecetasLog.length;
 }
 
+// ════════════════════════════════════════════════════════
+// EL BANCO QUE SE GUARDA ES SIEMPRE EL VIVO  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// recalcularBancoDesdeRecetas() escribe las columnas 4..7 de cada fila del
+// banco (mat/MO, basico y superior) usando recetaVigente() y precio*Vigente().
+// Con una obra APROBADA abierta, esas funciones devuelven los valores
+// CONGELADOS de esa obra — que es lo correcto para la obra, pero deja el array
+// `banco` (el CATALOGO COMPARTIDO) lleno de precios y recetas viejos.
+//
+// Ahi estaba la fuga: guardarBanco() serializa `banco` tal cual, lo escribe en
+// localStorage y lo sube a Supabase. Y la fusion a 3 vias (axoFusionarBanco)
+// trata cada fila como una unidad: una fila contaminada cuenta como "cambio
+// local" y LE GANA a la nube. Resultado: un rubro cuya receta ya se habia
+// actualizado volvia al precio viejo, para todos y en todos lados.
+// La guarda de cambios sin guardar tampoco lo veia: _bancoHuella() solo mira
+// materiales, manoDeObra, subcontratosCat y rendimientos, no las columnas 4..7.
+//
+// Regla: al catalogo compartido nunca se le escribe un precio de proyecto.
+// Lo que se guarda se recalcula con precios y recetas VIVOS, sin importar que
+// obra este abierta. El congelamiento del proyecto sigue intacto en pantalla:
+// esto no toca el `banco` en memoria, saca una copia limpia y lo restaura.
+// ════════════════════════════════════════════════════════
+function bancoLimpioParaGuardar(){
+  const backup = banco.map(r => r.slice());
+  const prev = _forzarPreciosVivos;
+  let limpio;
+  try{
+    _forzarPreciosVivos = true;            // ignora snapshotAprobado: precios y recetas vivos
+    recalcularBancoDesdeRecetas();
+    limpio = banco.map(r => r.slice());
+  }catch(e){
+    console.warn('[Banco] no se pudo limpiar antes de guardar, se guarda tal cual:', e);
+    limpio = null;
+  }finally{
+    _forzarPreciosVivos = prev;
+    // Restaurar en el MISMO array (no se cambia la identidad: hay handlers
+    // inline que escriben banco[idx][n] y tienen que seguir apuntando aca).
+    banco.forEach((r,i)=>{ const b = backup[i]; if(!b) return; for(let k=0;k<r.length;k++) r[k] = b[k]; });
+  }
+  return limpio || banco.map(r => r.slice());
+}
+
 function serializarBanco(){
-  return { v:1, banco, materiales, manoDeObra, rendimientos, subcontratosCat,
+  return { v:1, banco: bancoLimpioParaGuardar(), materiales, manoDeObra, rendimientos, subcontratosCat,
            isSub:Array.from(IS_SUB), subCat:SUB_COD_A_CAT, etapaAuto:ETAPA_AUTO };
 }
 function guardarBanco(){
@@ -6155,7 +6201,7 @@ let adjudicaciones = {}; // itemKey -> { ofertas:[{prov,precio}], ganadora:idx }
 // con cada monto editable antes de confirmar. No se persiste — es borrador de sesión,
 // igual que loteDraft.
 let repartoFacturaAbierto = false;
-let repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'' };
+let repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'', conFactura:true };
 let repartoFacturaMontos = {}; // id de material -> monto asignado (override editable)
 let cronoSemanas = 13; // semanas calculadas del calendario
 let cronoVista = 'cliente';
@@ -6497,13 +6543,62 @@ function _capturarCongeladoParaObra(p) {
   return { precios, recetas };
 }
 
+// ════════════════════════════════════════════════════════
+// 28/08/2026 — FALTABA SELLAR LA LISTA DE RUBROS (`filas`)
+// ────────────────────────────────────────────────────────
+// El sellado masivo guardaba precios y recetas, pero NUNCA `filas`. Y `filas` es
+// justo lo que mira rubrosVigentes() para decidir si una obra usa su presupuesto
+// congelado o el Banco vivo. Sin `filas`, una obra sellada seguia leyendo el
+// catalogo de hoy en Costeo, Oferta, Certificacion al Cliente, Cronograma y
+// exportaciones — y la auditoria la reportaba como "✅ sellada".
+// Ahora se sella tambien la lista de rubros, y la auditoria la informa.
+//
+// Se captura con el banco LIMPIO (precios vivos): si hubiera una obra aprobada
+// abierta, `banco` en memoria tiene los precios congelados de ESA obra, y se le
+// estarian sellando a las demas.
+// ════════════════════════════════════════════════════════
+function _capturarFilasParaObra(p, rows) {
+  rows = rows || banco;
+  const tip   = p.tipologia    || 'basico';
+  const cants = p.cantidades   || {};
+  const subs  = p.subcontratos || {};
+  const etaps = p.etapaRubro   || {};
+  const filas = [];
+  rows.forEach(row => {
+    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
+    const isSub = IS_SUB.has(cod);
+    const cant  = parseFloat(cants[cod] || 0);
+    let sub = 0;
+    if (isSub) {
+      const v = subs[cod];
+      if (v !== undefined && v !== '' && v !== null) {
+        sub = parseFloat(v) || 0;
+      } else {
+        const catId = SUB_COD_A_CAT[cod];
+        const sc = catId ? subcontratosCat.find(x => x.id === catId) : null;
+        const ref = sc ? ((tip === 'superior' ? sc.precioRefSup : sc.precioRefBas) || 0) : 0;
+        sub = cant * ref;
+      }
+    }
+    if (cant <= 0 && !(isSub && sub > 0)) return;
+    filas.push({
+      cat, cod, desc, unid,
+      mat: isSub ? 0 : ((tip === 'superior' ? ms  : mb)  || 0),
+      mo:  isSub ? 0 : ((tip === 'superior' ? mos : mob) || 0),
+      sub, cant, isSub,
+      et: etaps[cod] || ETAPA_AUTO[cod] || 'C3'
+    });
+  });
+  return filas;
+}
+
 function sellarPresupuestosCongelados() {
   const guardadas = getProyectosGuardados();
   const pendientes = Object.keys(guardadas).filter(nombre => {
     const p = guardadas[nombre];
     if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return false;
     const s = p.snapshotAprobado;
-    return !!s && (!s.preciosInsumos || !s.recetas);
+    return !!s && (!s.preciosInsumos || !s.recetas || !s.filas);
   });
 
   if (!pendientes.length) { alert('✅ Todas las obras aprobadas ya tienen precios y recetas congelados. No hay nada que sellar.'); return; }
@@ -6516,12 +6611,15 @@ function sellarPresupuestosCongelados() {
     'Y no toca el costo ni el precio de venta pactados.\n\n¿Continuar?')) return;
 
   const hoy = new Date().toISOString();
+  // Banco con precios y recetas VIVOS: nunca los de una obra aprobada abierta.
+  const rowsLimpias = (typeof bancoLimpioParaGuardar === 'function') ? bancoLimpioParaGuardar() : banco;
   let n = 0;
   pendientes.forEach(nombre => {
     const p = guardadas[nombre];
     const cap = _capturarCongeladoParaObra(p);
     if (!p.snapshotAprobado.preciosInsumos) p.snapshotAprobado.preciosInsumos = cap.precios;
     if (!p.snapshotAprobado.recetas)        p.snapshotAprobado.recetas        = cap.recetas;
+    if (!p.snapshotAprobado.filas)          p.snapshotAprobado.filas          = _capturarFilasParaObra(p, rowsLimpias);
     p.snapshotAprobado.selladoEl = hoy;
     n++;
   });
@@ -6536,6 +6634,115 @@ function sellarPresupuestosCongelados() {
 
   registrarActividad('Obras selladas (precios y recetas congelados): ' + pendientes.join(', '), '');
   alert('🔒 Listo. Se sellaron ' + n + ' obra(s).\n\nDe ahora en adelante, cambiar el Banco no mueve ningún número de estas obras. La alerta de suba de precio sigue funcionando.');
+}
+
+// ════════════════════════════════════════════════════════
+// MANTENIMIENTO AUTOMATICO  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Monica no tiene que acordarse de apretar nada. Al arrancar, el sistema:
+//
+//   1. SELLA sola toda obra aprobada a la que le falte precios, recetas o lista
+//      de rubros congelados. Sin ese sellado, `rubrosVigentes()` cae al Banco
+//      vivo y la obra sigue moviendose con el catalogo.
+//   2. REPARA el Banco guardado si tiene precios de proyecto metidos adentro
+//      (la fuga vieja de recalcularBancoDesdeRecetas escribiendo el congelado
+//      de la obra abierta en el catalogo compartido).
+//
+// Las dos operaciones son idempotentes: si no hay nada que hacer, no tocan nada
+// y no avisan. El sellado corre siempre; la reparacion del Banco SOLO despues de
+// una bajada exitosa de la nube, para no empujar una copia local vieja.
+// ════════════════════════════════════════════════════════
+let _selladoAutoHecho = false;
+let _reparacionBancoHecha = false;
+
+function _autoSellarObrasGuardadas() {
+  const guardadas = getProyectosGuardados();
+  const nombres = Object.keys(guardadas).filter(n => {
+    const p = guardadas[n];
+    if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return false;
+    const snap = p.snapshotAprobado;
+    return !!snap && (!snap.preciosInsumos || !snap.recetas || !snap.filas);
+  });
+  if (!nombres.length) return 0;
+
+  const rowsLimpias = bancoLimpioParaGuardar();
+  const hoy = new Date().toISOString();
+  nombres.forEach(n => {
+    const p = guardadas[n];
+    const cap = _capturarCongeladoParaObra(p);
+    if (!p.snapshotAprobado.preciosInsumos) p.snapshotAprobado.preciosInsumos = cap.precios;
+    if (!p.snapshotAprobado.recetas)        p.snapshotAprobado.recetas        = cap.recetas;
+    if (!p.snapshotAprobado.filas)          p.snapshotAprobado.filas          = _capturarFilasParaObra(p, rowsLimpias);
+    p.snapshotAprobado.selladoEl = hoy;
+  });
+  guardarProyectosGuardados(guardadas);
+
+  // Si la obra abierta es una de las selladas, refrescar su snapshot en memoria
+  if (proyectoActualNombre && nombres.indexOf(proyectoActualNombre) !== -1 &&
+      guardadas[proyectoActualNombre] && guardadas[proyectoActualNombre].snapshotAprobado) {
+    snapshotAprobado = JSON.parse(JSON.stringify(guardadas[proyectoActualNombre].snapshotAprobado));
+    if (typeof recalcular === 'function') recalcular();
+  }
+  registrarActividad('Obras aprobadas selladas automáticamente: ' + nombres.join(', '), '');
+  return nombres.length;
+}
+
+// Compara el Banco GUARDADO (no el de memoria: ahí es correcto que la obra
+// aprobada vea sus precios congelados) contra el que sale de las recetas y
+// precios vivos. Si difieren, el catálogo quedó contaminado y se reescribe.
+function _repararBancoSiHaceFalta() {
+  let guardado = null;
+  try { guardado = JSON.parse(localStorage.getItem('axo_banco') || 'null'); } catch(e) { return 0; }
+  if (!guardado || !Array.isArray(guardado.banco) || !guardado.banco.length) return 0;
+
+  const limpio = bancoLimpioParaGuardar();
+  const porCod = {};
+  limpio.forEach(r => { porCod[r[1]] = r; });
+
+  let difs = 0;
+  guardado.banco.forEach(r => {
+    const l = porCod[r[1]];
+    if (!l) return;
+    for (let k = 4; k <= 7; k++) {
+      if (Math.round(parseFloat(r[k]) || 0) !== Math.round(parseFloat(l[k]) || 0)) { difs++; return; }
+    }
+  });
+  if (!difs) return 0;
+
+  // Se guarda en silencio: guardarBanco() muestra toast o alert, y esto corre al arrancar.
+  try {
+    const txt = JSON.stringify(serializarBanco());   // ya serializa el banco limpio
+    localStorage.setItem('axo_banco', txt);
+    _bancoUltimoAplicado = txt;
+    _bancoHuellaAplicada = _bancoHuella();
+    if (typeof subirNube === 'function') subirNube('axo_banco');
+    registrarActividad('Banco de Precios reparado automáticamente', difs + ' rubro(s) tenían precio de proyecto');
+    console.warn('[Banco] reparado automáticamente: ' + difs + ' rubro(s) con precio de proyecto en el catálogo.');
+  } catch(e) { console.warn('[Banco] no se pudo reparar', e); return 0; }
+  return difs;
+}
+
+function mantenimientoAutomaticoAXO(opts) {
+  const conNube = !!(opts && opts.conNube);
+  const avisos = [];
+  if (!_selladoAutoHecho) {
+    _selladoAutoHecho = true;
+    try {
+      const n = _autoSellarObrasGuardadas();
+      if (n) avisos.push('🔒 ' + n + ' obra(s) aprobada(s) quedaron selladas — el Banco ya no las mueve');
+    } catch(e) { _selladoAutoHecho = false; console.warn('[Mantenimiento] sellado', e); }
+  }
+  if (conNube && !_reparacionBancoHecha) {
+    _reparacionBancoHecha = true;
+    try {
+      const d = _repararBancoSiHaceFalta();
+      if (d) avisos.push('🩺 Banco de Precios reparado (' + d + ' rubro/s tenían precio de una obra aprobada)');
+    } catch(e) { _reparacionBancoHecha = false; console.warn('[Mantenimiento] banco', e); }
+  }
+  if (avisos.length && typeof mostrarToastGuardado === 'function') {
+    setTimeout(() => mostrarToastGuardado(avisos.join(' · ')), 800);
+  }
+  return avisos;
 }
 
 function auditarPresupuestosCongelados() {
@@ -6560,6 +6767,7 @@ function auditarPresupuestosCongelados() {
       tieneSnap: !!snap,
       nPrecios: (snap && snap.preciosInsumos) ? Object.keys(snap.preciosInsumos).length : 0,
       nRecetas: (snap && snap.recetas) ? Object.keys(snap.recetas).length : 0,
+      nFilas:   (snap && Array.isArray(snap.filas)) ? snap.filas.length : 0,
       cdSnap, cdReceta, cdHoy
     });
   });
@@ -6594,11 +6802,15 @@ function auditarPresupuestosCongelados() {
       ? '   ✅ Precios congelados: ' + f.nPrecios + ' insumos.\n'
       : '   ⚠️ SIN precios congelados: Compras y Adjudicados usan el precio actual del Banco.\n';
     msg += f.nRecetas
-      ? '   ✅ Recetas congeladas: ' + f.nRecetas + ' rubros.\n\n'
-      : '   ⚠️ SIN recetas congeladas: corregir un rendimiento en el Banco todavía mueve esta obra.\n\n';
+      ? '   ✅ Recetas congeladas: ' + f.nRecetas + ' rubros.\n'
+      : '   ⚠️ SIN recetas congeladas: corregir un rendimiento en el Banco todavía mueve esta obra.\n';
+    msg += f.nFilas
+      ? '   ✅ Lista de rubros congelada: ' + f.nFilas + ' rubros.\n\n'
+      : '   ⚠️ SIN lista de rubros congelada: Costeo, Oferta, Certificación al Cliente, Cronograma\n'
+      + '      y las exportaciones todavía leen el Banco de hoy en esta obra.\n\n';
   });
 
-  const aSellar = filas.filter(f => f.tieneSnap && (!f.nPrecios || !f.nRecetas)).length;
+  const aSellar = filas.filter(f => f.tieneSnap && (!f.nPrecios || !f.nRecetas || !f.nFilas)).length;
   if (aSellar) {
     msg += '────────────────────────────────────────\n';
     msg += '⚠️ ' + aSellar + ' obra(s) con el congelado incompleto.\n';
@@ -6734,7 +6946,9 @@ function renderVencimientos() {
     return;
   }
 
-  const subsUsados = banco.filter(row => IS_SUB.has(row[1]) && parseFloat(cantidades[row[1]] || 0) > 0);
+  // Este panel solo corre con la obra APROBADA: los subcontratos que lista
+  // tienen que ser los del presupuesto congelado, no los del Costeo en vivo.
+  const subsUsados = banco.filter(row => IS_SUB.has(row[1]) && cantVigenteRubro(row[1]) > 0);
   const cod2desc = cod => { const r = getBancoRow(cod); return r ? r[2] : cod; };
   const items = obtenerVencimientosProyecto(vencimientos, cod2desc);
 
@@ -6888,7 +7102,9 @@ function fechaFinPlanRubro(cod) {
 // Costo de mano de obra / subcontrato de un rubro (lo que se le paga al personal/subcontratista)
 function costoManoObraRubro(cod) {
   if (IS_SUB.has(cod)) return subTotal(cod);
-  return getMOUnit(cod) * parseFloat(cantidades[cod] || 0);
+  // 28/08/2026 — usaba getMOUnit() (precio del Banco de hoy) y la cantidad viva.
+  // En una obra aprobada el Corte Administrativo certificaba con otro numero.
+  return costoUnitVigente(cod).mo * cantVigenteRubro(cod);
 }
 
 // Rubros usados cuya fecha fin planificada cae dentro de la fecha límite,
@@ -6898,9 +7114,8 @@ function rubrosPendientesHasta(fechaLimiteStr) {
   const yaHechos = new Set();
   cortesAdmin.forEach(c => (c.items || []).forEach(it => { if (it.hecho) yaHechos.add(it.cod); }));
   const pendientes = [];
-  banco.forEach(row => {
-    const cod = row[1];
-    if (parseFloat(cantidades[cod] || 0) <= 0) return;
+  rubrosDelPresupuesto().forEach(r => {
+    const cod = r.cod;
     if (yaHechos.has(cod)) return;
     const ff = fechaFinPlanRubro(cod);
     if (!ff) return;
@@ -7115,9 +7330,21 @@ function autoSellarSnapshot() {
   if (!(estadoProyecto === 'aprobado' || estadoProyecto === 'finalizado')) return false;
   const tip = snapshotAprobado.tipologia || document.getElementById('p-tipologia')?.value || 'basico';
   let cambio = false;
-  if (!snapshotAprobado.preciosInsumos) { snapshotAprobado.preciosInsumos = capturarPreciosInsumosVivos(tip); cambio = true; }
-  if (!snapshotAprobado.recetas)        { snapshotAprobado.recetas        = capturarRecetasVivas();          cambio = true; }
-  if (!snapshotAprobado.filas)          { snapshotAprobado.filas          = capturarFilasPresupuesto(tip);   cambio = true; }
+  // 28/08/2026 — se captura con el Banco forzado a precios y recetas VIVOS.
+  // Sin esto, si el snapshot ya tenía precios congelados pero le faltaban las
+  // filas, la lista se sellaba con los precios congelados de la propia obra en
+  // vez de con los del catálogo — y quedaba sellada sobre sí misma.
+  const _prevFPV = _forzarPreciosVivos;
+  try {
+    _forzarPreciosVivos = true;
+    recalcularBancoDesdeRecetas();
+    if (!snapshotAprobado.preciosInsumos) { snapshotAprobado.preciosInsumos = capturarPreciosInsumosVivos(tip); cambio = true; }
+    if (!snapshotAprobado.recetas)        { snapshotAprobado.recetas        = capturarRecetasVivas();          cambio = true; }
+    if (!snapshotAprobado.filas)          { snapshotAprobado.filas          = capturarFilasPresupuesto(tip);   cambio = true; }
+  } finally {
+    _forzarPreciosVivos = _prevFPV;
+    recalcularBancoDesdeRecetas();   // dejar el banco como lo espera el proyecto abierto
+  }
   if (cambio) {
     snapshotAprobado.selladoEl = new Date().toISOString();
     registrarActividad('Presupuesto congelado sellado automáticamente', document.getElementById('p-cliente')?.value || '');
@@ -7151,6 +7378,101 @@ function rubrosVigentes(tip) {
       congelada: false
     };
   });
+}
+
+// ════════════════════════════════════════════════════════
+// LOS RUBROS QUE FORMAN EL PRESUPUESTO — definicion unica  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Todas las pantallas repetian la misma cuenta a mano sobre `banco` +
+// `cantidades` en vivo: "si cant<=0 y no es un sub con monto, saltear". Con una
+// obra aprobada eso leia el catalogo de HOY en vez del presupuesto congelado, y
+// cada pantalla ademas resolvia el monto del subcontrato a su manera — varias
+// usaban `subcontratos[cod]` directo, asi que un subcontrato con precio de
+// REFERENCIA (sin precio manual cargado) daba 0 y desaparecia de la Oferta y de
+// la Certificacion al Cliente sin ningun aviso.
+//
+// Esta funcion es ahora la unica respuesta a "que rubros tiene esta obra y
+// cuanto cuesta cada uno": sale de rubrosVigentes() (congelado si la obra esta
+// aprobada) y resuelve el subcontrato con subTotal() (manual o referencia).
+// ════════════════════════════════════════════════════════
+function rubrosDelPresupuesto(tip) {
+  tip = tip || document.getElementById('p-tipologia')?.value || 'basico';
+  const out = [];
+  rubrosVigentes(tip).forEach(r => {
+    const cant = parseFloat(r.cant) || 0;
+    const isSub = !!r.isSub;
+    const sub  = isSub ? (parseFloat(r.sub) || 0) : 0;
+    if (cant <= 0 && sub <= 0) return;
+    const mat = isSub ? 0 : (parseFloat(r.mat) || 0);
+    const mo  = isSub ? 0 : (parseFloat(r.mo)  || 0);
+    out.push({ cat:r.cat, cod:r.cod, desc:r.desc, unid:r.unid, et:r.et || 'C3',
+               isSub, cant, mat, mo, sub,
+               costo: isSub ? sub : cant * (mat + mo) });
+  });
+  return out;
+}
+
+// ════════════════════════════════════════════════════════
+// COSTO UNITARIO VIGENTE DE UN RUBRO  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Los Adicionales y las Correcciones de Computo se valorizaban con
+// getBancoRow(ad.cod), o sea con el precio del Banco de HOY, incluso en una obra
+// APROBADA. El mismo adicional costaba una cosa en Costeo/Oferta y otra en
+// Compras (que ya pasaba por precioMatVigente/recetaVigente, congelados).
+//
+// Orden de busqueda: la fila congelada del presupuesto → la receta y los precios
+// vigentes del proyecto → el precio manual del banco para rubros sin receta.
+// ════════════════════════════════════════════════════════
+// Cantidad vigente de un rubro en ESTA obra: la congelada si esta aprobada,
+// la del Costeo si no. Para las pantallas que solo necesitan la cantidad y no
+// vale la pena recorrerles el presupuesto entero.
+function cantVigenteRubro(cod) {
+  if (!_forzarPreciosVivos && snapshotAprobado && snapshotAprobado.filas) {
+    const f = snapshotAprobado.filas.find(x => x && x.cod === cod);
+    return f ? (parseFloat(f.cant) || 0) : 0;
+  }
+  return parseFloat(cantidades[cod] || 0);
+}
+
+function costoUnitVigente(cod, tip) {
+  tip = tip || document.getElementById('p-tipologia')?.value || 'basico';
+
+  if (!_forzarPreciosVivos && snapshotAprobado && snapshotAprobado.filas) {
+    const f = snapshotAprobado.filas.find(x => x && x.cod === cod);
+    if (f) {
+      if (f.isSub) {
+        const c = parseFloat(f.cant) || 0;
+        const t = parseFloat(f.sub) || 0;
+        return { mat: c > 0 ? t / c : t, mo: 0 };
+      }
+      return { mat: parseFloat(f.mat) || 0, mo: parseFloat(f.mo) || 0 };
+    }
+  }
+
+  if (IS_SUB.has(cod)) {
+    const catId = SUB_COD_A_CAT[cod];
+    return { mat: catId ? (precioSubRefVigente(catId, tip) || 0) : 0, mo: 0 };
+  }
+
+  const receta = recetaVigente(cod);
+  if (receta) {
+    let mat = 0, mo = 0;
+    (receta.materiales || []).forEach(it => {
+      const id = (tip === 'superior' && it.idSup && getMaterial(it.idSup)) ? it.idSup : it.id;
+      if (!getMaterial(id)) return;
+      mat += (parseFloat(it.cant) || 0) * precioMatVigente(id, tip);
+    });
+    (receta.mo || []).forEach(it => {
+      if (!getMO(it.id)) return;
+      mo += (parseFloat(it.cant) || 0) * precioMOVigente(it.id, tip);
+    });
+    return { mat, mo };
+  }
+
+  const row = getBancoRow(cod);
+  if (!row) return { mat:0, mo:0 };
+  return { mat: (tip === 'superior' ? row[5] : row[4]) || 0,
+           mo:  (tip === 'superior' ? row[7] : row[6]) || 0 };
 }
 
 function recetaVigente(cod) {
@@ -7339,18 +7661,36 @@ function calcular() {
   let cdAdicionalesCorreccion = 0;
   let cobroExtraAdicionalesByEtapa = { C1:0, C2:0, C3:0, R:0 };
 
+  // ── DOBLE CONTEO DE LOS ADICIONALES YA APROBADOS (FIX 28/08/2026) ────────
+  // snapshotAprobado.cd y .cdByEtapa se capturan con calcular() en el momento de
+  // aprobar, o sea que YA traen adentro el costo de los adicionales y
+  // correcciones que existían en ese momento. Volver a sumarlos abajo los
+  // contaba dos veces: el costo directo salía inflado y el margen real, hundido.
+  // (El COBRO del adicional cliente sí se sigue sumando siempre: pv congelado no
+  // lo incluye, se agrega recién en pf.)
+  // Solo aplica a las obras cuyo snapshot guardó la lista de adicionales; en las
+  // más viejas, sin esa lista, no hay forma de saberlo y todo queda como estaba.
+  const _adicYaEnSnapshot = new Set();
+  if (snapshotAprobado && Array.isArray(snapshotAprobado.adicionales)) {
+    snapshotAprobado.adicionales.forEach(a => { if (a && a.id != null) _adicYaEnSnapshot.add(String(a.id)); });
+  }
+
   adicionales.forEach(ad => {
     const row = getBancoRow(ad.cod);
     if (!row) return;
-    const mat = tip === 'superior' ? row[5] : row[4];
-    const mo  = tip === 'superior' ? row[7] : row[6];
+    // 28/08/2026 — precio VIGENTE del proyecto (congelado si la obra esta
+    // aprobada), no el del Banco de hoy. Ver costoUnitVigente().
+    const { mat, mo } = costoUnitVigente(ad.cod, tip);
     const costo = parseFloat(ad.cant || 0) * (mat + mo);   // lo que pagás vos (insumos + MO)
+    const yaContado = _adicYaEnSnapshot.has(String(ad.id));   // su costo ya vive dentro del cd congelado
 
     if (ad.tipo === 'correccion') {
-      cd += costo; // afecta el costo directo real (para ver tu margen verdadero)
-      cdAdicionalesCorreccion += costo;
-      const et = etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
-      cdByEtapa[et] = (cdByEtapa[et] || 0) + costo;
+      cdAdicionalesCorreccion += costo;   // informativo: cuánto del cd son correcciones
+      if (!yaContado) {
+        cd += costo; // afecta el costo directo real (para ver tu margen verdadero)
+        const et = etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
+        cdByEtapa[et] = (cdByEtapa[et] || 0) + costo;
+      }
     } else if (ad.tipo === 'cliente') {
       const et = ad.etapa || 'C3';
       const margen = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
@@ -7358,7 +7698,7 @@ function calcular() {
       cobroExtraAdicionalesByEtapa[et] = (cobroExtraAdicionalesByEtapa[et] || 0) + cobro;
       // El costo real (insumos+MO) entra al cd para el análisis de margen,
       // pero al cliente se le cobra costo + margen (venta nueva, no pasa por el índice del presupuesto).
-      cdByEtapa[et] = (cdByEtapa[et] || 0) + costo;
+      if (!yaContado) cdByEtapa[et] = (cdByEtapa[et] || 0) + costo;
     }
   });
 
@@ -7457,36 +7797,42 @@ function renderCosteo() {
 
   let totMat=0, totMO=0, totSub=0;
 
-  banco.forEach(row => {
-    const [cat,cod,desc,unid,mb,ms,mob,mos] = row;
-    const et = etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3';
-    const ei = ETAPA_INFO[et];
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
+  // ════════════════════════════════════════════════════════
+  // 28/08/2026 — EL COSTEO LEE LA MISMA LISTA QUE TODO EL RESTO
+  // ────────────────────────────────────────────────────────
+  // Antes esta tabla recorria `banco` + `cantidades` EN VIVO aunque la obra
+  // estuviera aprobada, mientras el TOTAL salia del snapshot congelado. Un
+  // rubro que entraba al computo despues de aprobar aparecia como fila y no
+  // sumaba: la diferencia se la tragaba en silencio la fila "Ajuste al
+  // presupuesto aprobado". Ahora usa rubrosVigentes(), que devuelve las filas
+  // CONGELADAS si la obra esta aprobada y el Banco vivo si no — la misma
+  // fuente que Compras, Adjudicados, Certificacion y Flujo de Caja.
+  // Un presupuesto aprobado no se toca: lo nuevo va por Adicionales y Ajustes.
+  // ════════════════════════════════════════════════════════
+  rubrosVigentes(tip).forEach(r => {
+    const cat = r.cat, cod = r.cod, desc = r.desc, unid = r.unid;
+    const et = r.et || 'C3';
+    const ei = ETAPA_INFO[et] || ETAPA_INFO.C3;
+    const isSub = !!r.isSub;
+    const cant = parseFloat(r.cant) || 0;
+    const sub  = isSub ? (parseFloat(r.sub) || 0) : 0;
 
-    // FIX jul2026: en un proyecto congelado (Aprobado/Finalizado) no mostramos
-    // rubros que no formaban parte del presupuesto aprobado (cantidad 0 y sin
-    // subcontrato cargado) — evita que un rubro agregado después al Banco de
-    // Precios aparezca como fila fantasma en proyectos ya cerrados. En modo
-    // edición (no congelado) se sigue viendo el banco completo, como siempre.
-    if (congelado) {
-      const subCargado = isSub && subcontratos[cod] !== undefined && subcontratos[cod] !== '' && subcontratos[cod] !== null && parseFloat(subcontratos[cod]) > 0;
-      if (cant <= 0 && !subCargado) return;
-    }
+    // En obra congelada solo se listan los rubros que formaban parte del
+    // presupuesto aprobado. En edicion se sigue viendo el banco completo.
+    if (congelado && cant <= 0 && sub <= 0) return;
 
     if (cat !== prevCat) {
       html += `<tr class="cat-row"><td colspan="12">${cat}</td></tr>`;
       prevCat = cat;
     }
 
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
+    const mat = parseFloat(r.mat) || 0;
+    const mo  = parseFloat(r.mo)  || 0;
     const tMat = isSub ? 0 : cant * mat;
     const tMO  = isSub ? 0 : cant * mo;
     const refCat = SUB_COD_A_CAT[cod] ? subcontratosCat.find(s => s.id === SUB_COD_A_CAT[cod]) : null;
-    const refPrecio = refCat ? (tip === 'superior' ? refCat.precioRefSup : refCat.precioRefBas) : 0;
+    const refPrecio = refCat ? precioSubRefVigente(refCat.id, tip) : 0;
     const subManual = (subcontratos[cod] !== undefined && subcontratos[cod] !== '' && subcontratos[cod] !== null);
-    const sub  = isSub ? (subManual ? parseFloat(subcontratos[cod]) : (cant * refPrecio)) : 0;
     const tot  = tMat + tMO + sub;
     if (!isSub) { totMat += tMat; totMO += tMO; }
     else totSub += sub;
@@ -7512,7 +7858,7 @@ function renderCosteo() {
       <td>${desc}</td>
       <td class="center">${unid}</td>
       <td>
-        <input type="number" value="${cantidades[cod]||''}" ${disAttr}
+        <input type="number" value="${congelado ? (cant||'') : (cantidades[cod]||'')}" ${disAttr}
           style="width:80px;padding:4px 8px;border:1.5px solid var(--accent);border-radius:4px;font-size:13px;background:${congelado?'#F0F0F0':'var(--yellow)'};text-align:right"
           placeholder="0"
           onchange="cantidades['${cod}']=this.value;recalcular()">
@@ -7592,16 +7938,8 @@ function factorVentaRubros() {
   const tip = document.getElementById('p-tipologia')?.value || 'basico';
   const { pf, cobroExtraTotal } = calcular();
   let sumaCostos = 0;
-  banco.forEach(row => {
-    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = isSub ? subTotal(cod, tip) : 0;
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
-    const costoRubro = isSub ? sub : cant * (mat + mo);
-    if (costoRubro > 0) sumaCostos += costoRubro;
+  rubrosDelPresupuesto(tip).forEach(r => {
+    if (r.costo > 0) sumaCostos += r.costo;
   });
   const base = Math.round(pf) - Math.round(cobroExtraTotal || 0);
   return sumaCostos > 0 ? base / sumaCostos : 0;
@@ -7623,19 +7961,12 @@ function resumenCapitulos() {
   const orden = [], acc = {};
   let sumaCostos = 0;
 
-  banco.forEach(row => {
-    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = isSub ? subTotal(cod, tip) : 0;
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
-    const costoRubro = isSub ? sub : cant * (mat + mo);
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const costoRubro = r.costo;
     if (costoRubro <= 0) return;
-    if (acc[cat] === undefined) { acc[cat] = { costo:0, rubros:[] }; orden.push(cat); }
-    acc[cat].costo += costoRubro;
-    acc[cat].rubros.push({ cod, desc, unid, cant, isSub, costo:costoRubro });
+    if (acc[r.cat] === undefined) { acc[r.cat] = { costo:0, rubros:[] }; orden.push(r.cat); }
+    acc[r.cat].costo += costoRubro;
+    acc[r.cat].rubros.push({ cod:r.cod, desc:r.desc, unid:r.unid, cant:r.cant, isSub:r.isSub, costo:costoRubro });
     sumaCostos += costoRubro;
   });
 
@@ -7895,23 +8226,18 @@ function renderOfertaCosteo() {
   </tr></thead><tbody>`;
   let n=0; let prevCat='';
 
-  banco.forEach(row => {
-    const [cat,cod,desc,unid] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    if (cant <= 0 && !isSub) return;
-    const sub = isSub ? parseFloat(subcontratos[cod]||0) : 0;
-    if (isSub && sub <= 0) return;
+  // 28/08/2026 — antes leia `subcontratos[cod]` directo: un subcontrato con
+  // precio de REFERENCIA (sin precio manual) daba 0 y no salia en la oferta.
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cat = r.cat, cod = r.cod, desc = r.desc, unid = r.unid;
+    const isSub = r.isSub, cant = r.cant;
 
     if (cat !== prevCat) {
       html += `<tr class="cat-row"><td colspan="5">${cat}</td></tr>`;
       prevCat = cat; n=0;
     }
     n++;
-    const tip2 = tip;
-    const mat = tip2==='superior' ? row[5] : row[4];
-    const mo  = tip2==='superior' ? row[7] : row[6];
-    const costoRubro = isSub ? sub : cant*(mat+mo);
+    const costoRubro = r.costo;
     const precioRubro = costoRubro * factor;
     
     // Detectar si este rubro tiene adicionales cargados
@@ -7941,8 +8267,7 @@ function renderOfertaCosteo() {
       const bancoRow = getBancoRow(ad.cod);
       if (!bancoRow) return;
       
-      const mat = tip === 'superior' ? bancoRow[5] : bancoRow[4];
-      const mo  = tip === 'superior' ? bancoRow[7] : bancoRow[6];
+      const { mat, mo } = costoUnitVigente(ad.cod, tip);
       const cant = parseFloat(ad.cant) || 0;
       const margenAd = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
       const monto = cant * (mat + mo) * (1 + margenAd / 100);
@@ -8739,13 +9064,7 @@ function actualizarPlazo() {
 // Categorías con cantidad cargada (o subcontrato con costo), en el orden natural de obra.
 function categoriasActivasOrdenadas() {
   const cats = {};
-  banco.forEach(row => {
-    const [cat, cod] = row;
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    const isSub = IS_SUB.has(cod);
-    if ((cant > 0 && !isSub) || (isSub && sub > 0)) cats[cat] = true;
-  });
+  rubrosDelPresupuesto().forEach(r => { cats[r.cat] = true; });
   const enSecuencia = SECUENCIA_CATEGORIAS.filter(c => cats[c]);
   const fuera = Object.keys(cats).filter(c => !SECUENCIA_CATEGORIAS.includes(c));
   return [...enSecuencia, ...fuera];
@@ -8754,15 +9073,12 @@ function categoriasActivasOrdenadas() {
 // según las recetas y cantidades del Costeo — no un promedio genérico.
 function jornalesPorCategoria(cat) {
   let total = 0;
-  banco.forEach(row => {
-    const [c, cod] = row;
-    if (c !== cat) return;
-    if (IS_SUB.has(cod)) return; // los subcontratos no consumen tu propia cuadrilla
-    const cant = parseFloat(cantidades[cod] || 0);
-    if (cant <= 0) return;
-    const receta = recetaVigente(cod);
+  rubrosDelPresupuesto().forEach(r => {
+    if (r.cat !== cat) return;
+    if (r.isSub) return; // los subcontratos no consumen tu propia cuadrilla
+    const receta = recetaVigente(r.cod);
     if (!receta) return;
-    (receta.mo || []).forEach(item => { total += item.cant * cant; });
+    (receta.mo || []).forEach(item => { total += item.cant * r.cant; });
   });
   return total;
 }
@@ -8786,15 +9102,9 @@ function generarCronograma() {
 
   cronograma = {};
   const cats = {};
-  banco.forEach(row => {
-    const [cat, cod] = row;
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    const isSub = IS_SUB.has(cod);
-    if ((cant > 0 && !isSub) || (isSub && sub > 0)) {
-      if (!cats[cat]) cats[cat] = [];
-      cats[cat].push(cod);
-    }
+  rubrosDelPresupuesto().forEach(r => {
+    if (!cats[r.cat]) cats[r.cat] = [];
+    cats[r.cat].push(r.cod);
   });
 
   // FIX jul2026: la duración de cada categoría ahora sale de la mano de obra real
@@ -8874,15 +9184,9 @@ function escalarCronogramaAPlazo(diasObjetivo) {
   // de solape que generarCronograma, pero sin recalcular la duración desde los jornales
   // — así lo fijado a mano queda intacto y el resto se acomoda alrededor).
   const cats = {};
-  banco.forEach(row => {
-    const [cat, cod] = row;
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    const isSub = IS_SUB.has(cod);
-    if ((cant > 0 && !isSub) || (isSub && sub > 0)) {
-      if (!cats[cat]) cats[cat] = [];
-      cats[cat].push(cod);
-    }
+  rubrosDelPresupuesto().forEach(r => {
+    if (!cats[r.cat]) cats[r.cat] = [];
+    cats[r.cat].push(r.cod);
   });
   let cursorDia = 1;
   categoriasActivasOrdenadas().forEach(cat => {
@@ -9060,15 +9364,9 @@ function setCuadrillaTamano(val) {
 // categoría en el orden natural de obra — para listar en el selector de dependencias.
 function rubrosActivosOrdenados() {
   const porCategoria = {};
-  banco.forEach(row => {
-    const [cat, cod, desc] = row;
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    const isSub = IS_SUB.has(cod);
-    if ((cant > 0 && !isSub) || (isSub && sub > 0)) {
-      if (!porCategoria[cat]) porCategoria[cat] = [];
-      porCategoria[cat].push({ cod, desc, cat });
-    }
+  rubrosDelPresupuesto().forEach(r => {
+    if (!porCategoria[r.cat]) porCategoria[r.cat] = [];
+    porCategoria[r.cat].push({ cod:r.cod, desc:r.desc, cat:r.cat });
   });
   let out = [];
   categoriasActivasOrdenadas().forEach(cat => { out = out.concat(porCategoria[cat] || []); });
@@ -9514,16 +9812,9 @@ function renderGantt() {
 
   // Agrupar rubros activos por etapa
   const rubrosPorEtapa = { C1:[], C2:[], C3:[], R:[] };
-  banco.forEach(row => {
-    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod, tip);
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
-    const costoRubro = isSub ? sub : cant * (mat + mo);
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cat = r.cat, cod = r.cod, desc = r.desc, unid = r.unid;
+    const costoRubro = r.costo;
     const precioRubro = costoRubro * factor;
     const montoMostrar = vista === 'cliente' ? precioRubro : costoRubro;
 
@@ -9629,8 +9920,7 @@ function renderGantt() {
     adicCliente.forEach(ad => {
       const bancoRow = getBancoRow(ad.cod);
       if (!bancoRow) return;
-      const mat = tip === 'superior' ? bancoRow[5] : bancoRow[4];
-      const mo  = tip === 'superior' ? bancoRow[7] : bancoRow[6];
+      const { mat, mo } = costoUnitVigente(ad.cod, tip);
       const cant = parseFloat(ad.cant) || 0;
       const margenAd = (ad.margen!==undefined && ad.margen!==null && ad.margen!=='') ? parseFloat(ad.margen) : 50;
       const costoAd = cant * (mat + mo);
@@ -9838,7 +10128,7 @@ function pctCompradoDeReceta(receta, cantRubro, et, tip, necesidadesEtapa, sufij
   return Math.round(sumaPonderada / costoTotal * 100);
 }
 function pctCompradoRubro(cod, et, tip, necesidadesEtapa) {
-  const cant = parseFloat(cantidades[cod] || 0);
+  const cant = cantVigenteRubro(cod);
   if (IS_SUB.has(cod)) {
     const costoRubro = subTotal(cod, tip);
     if (costoRubro <= 0) return null;
@@ -9854,8 +10144,7 @@ function pctCompradoRubro(cod, et, tip, necesidadesEtapa) {
 function pctCompradoAdicional(ad, et, tip, necesidadesEtapa) {
   if (IS_SUB.has(ad.cod)) {
     const bancoRow = getBancoRow(ad.cod); if (!bancoRow) return null;
-    const mat = tip === 'superior' ? bancoRow[5] : bancoRow[4];
-    const mo = tip === 'superior' ? bancoRow[7] : bancoRow[6];
+    const { mat, mo } = costoUnitVigente(ad.cod, tip);
     const cant = parseFloat(ad.cant) || 0;
     const costoRubro = cant * (mat + mo);
     if (costoRubro <= 0) return null;
@@ -9949,16 +10238,9 @@ function renderGanttReal() {
 
   // Agrupar rubros activos por etapa
   const rubrosPorEtapa = { C1:[], C2:[], C3:[], R:[] };
-  banco.forEach(row => {
-    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod, tip);
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
-    const costoRubro = isSub ? sub : cant * (mat + mo);
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cat = r.cat, cod = r.cod, desc = r.desc, unid = r.unid;
+    const costoRubro = r.costo;
     // El cronograma REAL mide avance financiero de OBRA → se usa el COSTO, no el precio de venta.
     const montoMostrar = costoRubro;
 
@@ -10040,8 +10322,7 @@ function renderGanttReal() {
     filas += `<tr><td colspan="${5 + totalSemanas}" style="background:#E65100;color:#fff;font-weight:700;font-size:12px;padding:7px 12px">➕ ADICIONALES (${adicClienteR.length})</td></tr>`;
     adicClienteR.forEach(ad => {
       const bancoRow = getBancoRow(ad.cod); if (!bancoRow) return;
-      const mat = tip==='superior'?bancoRow[5]:bancoRow[4];
-      const mo = tip==='superior'?bancoRow[7]:bancoRow[6];
+      const { mat, mo } = costoUnitVigente(ad.cod, tip);
       const cant = parseFloat(ad.cant)||0;
       const etAd = ad.etapa || etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
       const pctCompradoAd = pctCompradoAdicional(ad, etAd, tip, necesidadesData[etAd]);
@@ -10177,18 +10458,27 @@ function calcularNecesidades() {
     });
   });
 
-  // ── ADICIONALES: ítems aparte, identificados (no se fusionan con rubros) ──
-  (adicionales || []).filter(a=>a&&a.tipo==='cliente'&&a.cod).forEach(ad => {
+  // ── ADICIONALES Y CORRECCIONES: ítems aparte, identificados ──────────────
+  // 28/08/2026 — antes este filtro dejaba afuera las Correcciones de Computo.
+  // Una correccion infla el cd (y con eso la bolsa Obra del Flujo de Caja),
+  // pero sus materiales y su mano de obra no aparecian en ningun lado: ni para
+  // comprarlos, ni para adjudicarlos, ni para certificarlos. Ese era otro de
+  // los motivos por los que Compras nunca cerraba contra el Flujo.
+  // Una correccion es trabajo real que hay que ejecutar: entra al computo de
+  // necesidades igual que un adicional, marcada con 🔧 para no confundirla.
+  (adicionales || []).filter(a=>a&&(a.tipo==='cliente'||a.tipo==='correccion')&&a.cod).forEach(ad => {
     const cant = parseFloat(ad.cant) || 0;
     if (cant <= 0) return;
+    const esCorr = ad.tipo === 'correccion';
+    const ico = esCorr ? '🔧 ' : '➕ ';
+    const sfx = esCorr ? ' (corrección)' : ' (adic.)';
     const et = ad.etapa || etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
     const bucket = etapas[et] || etapas.C3;
-    const sufijo = '#adic:'+ad.id; // clave única por adicional
+    const sufijo = '#adic:'+ad.id; // clave única por adicional/corrección
     if (IS_SUB.has(ad.cod)) {
       const bancoRow = getBancoRow(ad.cod);
-      const mat = bancoRow ? (tip==='superior'?bancoRow[5]:bancoRow[4]) : 0;
-      const mo = bancoRow ? (tip==='superior'?bancoRow[7]:bancoRow[6]) : 0;
-      bucket.sub.push({ cod:ad.cod+sufijo, desc:'➕ '+(bancoRow?bancoRow[2]:ad.cod)+' (adicional)', cant, costo:cant*(mat+mo), adic:true });
+      const { mat, mo } = costoUnitVigente(ad.cod, tip);
+      bucket.sub.push({ cod:ad.cod+sufijo, desc:ico+(bancoRow?bancoRow[2]:ad.cod)+(esCorr?' (corrección)':' (adicional)'), cant, costo:cant*(mat+mo), adic:true, correccion:esCorr });
       return;
     }
     const receta = recetaVigente(ad.cod);
@@ -10199,7 +10489,7 @@ function calcularNecesidades() {
       const precio = precioMatVigente(id, tip);
       const totalCant = item.cant*cant;
       const key = id+sufijo;
-      if (!bucket.mat[key]) bucket.mat[key] = { nombre:'➕ '+m.nombre+' (adic.)', unidad:m.unidad, cant:0, precio, costo:0, adic:true, realId:id };
+      if (!bucket.mat[key]) bucket.mat[key] = { nombre:ico+m.nombre+sfx, unidad:m.unidad, cant:0, precio, costo:0, adic:true, correccion:esCorr, realId:id };
       bucket.mat[key].cant += totalCant; bucket.mat[key].costo += totalCant*precio;
     });
     (receta.mo || []).forEach(item => {
@@ -10207,7 +10497,7 @@ function calcularNecesidades() {
       const precio = precioMOVigente(item.id, tip);
       const totalCant = item.cant*cant;
       const key = item.id+sufijo;
-      if (!bucket.mo[key]) bucket.mo[key] = { nombre:'➕ '+mo.nombre+' (adic.)', unidad:mo.unidad, cant:0, precio, costo:0, adic:true, realId:item.id };
+      if (!bucket.mo[key]) bucket.mo[key] = { nombre:ico+mo.nombre+sfx, unidad:mo.unidad, cant:0, precio, costo:0, adic:true, correccion:esCorr, realId:item.id };
       bucket.mo[key].cant += totalCant; bucket.mo[key].costo += totalCant*precio;
     });
   });
@@ -11113,14 +11403,12 @@ function exportarHistPreciosPDF(){
 function necesidadMaterialesPorCategoria(categoria, et) {
   const tip = document.getElementById('p-tipologia')?.value || 'basico';
   const out = {}; // id -> {nombre,unidad,precio,necesario}
-  banco.forEach(row => {
-    const [cat, cod] = row;
-    if (cat !== categoria) return;
-    if (IS_SUB.has(cod)) return; // los subcontratos no tienen desglose de materiales
-    const cant = parseFloat(cantidades[cod] || 0);
-    if (cant <= 0) return;
-    const rEt = etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3';
-    if (rEt !== et) return;
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cod = r.cod;
+    if (r.cat !== categoria) return;
+    if (r.isSub) return; // los subcontratos no tienen desglose de materiales
+    const cant = r.cant;
+    if (r.et !== et) return;
     const receta = recetaVigente(cod);
     if (!receta) return;
     (receta.materiales || []).forEach(item => {
@@ -11172,7 +11460,7 @@ function toggleRepartoFactura() {
   renderComprasCompleto();
 }
 function setRepartoFacturaCampo(campo, val) {
-  repartoFacturaDraft[campo] = val;
+  repartoFacturaDraft[campo] = (campo === 'conFactura') ? !!val : val;
   if (campo === 'categoria' || campo === 'etapa' || campo === 'monto') repartoFacturaMontos = {};
   renderComprasCompleto();
 }
@@ -11182,7 +11470,7 @@ function setRepartoMontoItem(id, val) {
 }
 function cancelarRepartoFactura() {
   repartoFacturaAbierto = false;
-  repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'' };
+  repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'', conFactura:true };
   repartoFacturaMontos = {};
   renderComprasCompleto();
 }
@@ -11199,17 +11487,22 @@ function confirmarRepartoFactura() {
   const diff = montoNum - totalAsignado;
   if (Math.abs(diff) > 1 && !confirm('El total repartido (₲'+fmtN(Math.round(totalAsignado))+') no coincide exactamente con el monto de la factura (₲'+fmtN(Math.round(montoNum))+'). ¿Confirmás igual?')) return;
   const facturaId = 'fact_'+Date.now();
+  // 28/08/2026 — estos lotes se creaban SIN el campo `f`, y estadoFacturaLote()
+  // lee la ausencia como "con factura". Una carga por monto que en realidad no
+  // tenia comprobante quedaba contada como respaldada e inflaba el credito
+  // fiscal, sin manera de destildarla al cargar. Ahora se guarda explicito.
+  const conFact = repartoFacturaDraft.conFactura !== false;
   conMonto.forEach(it => {
     const ekey = 'mat:'+it.id+'@'+etapa;
     if (!ejecucion[ekey]) ejecucion[ekey] = {};
     if (!ejecucion[ekey].lotes) ejecucion[ekey].lotes = [];
     const cant = it.precio > 0 ? it.montoAsignado / it.precio : 0;
-    ejecucion[ekey].lotes.push({ cant, precio: it.precio, fecha: fecha || new Date().toISOString().split('T')[0], prov: prov || '', repartoAuto:true, facturaId });
+    ejecucion[ekey].lotes.push({ cant, precio: it.precio, fecha: fecha || new Date().toISOString().split('T')[0], prov: prov || '', repartoAuto:true, facturaId, f: conFact });
     syncVal(ekey);
   });
   registrarActividad('Factura repartida automáticamente', (prov||'Sin proveedor')+' — ₲'+fmtN(Math.round(totalAsignado))+' en '+categoria);
   repartoFacturaAbierto = false;
-  repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'' };
+  repartoFacturaDraft = { categoria:'', etapa:'', prov:'', monto:'', fecha:'', conFactura:true };
   repartoFacturaMontos = {};
   invalidarHist();
   renderComprasCompleto();
@@ -11259,6 +11552,9 @@ function renderRepartoFacturaPanel() {
         <input type="text" placeholder="Proveedor" value="${(d.prov||'').replace(/"/g,'')}" onchange="setRepartoFacturaCampo('prov', this.value)" style="width:150px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px">
         <input type="number" placeholder="Monto total ₲" value="${d.monto||''}" onchange="setRepartoFacturaCampo('monto', this.value)" style="width:140px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;text-align:right">
         ${inputFechaHTML(d.fecha, `setRepartoFacturaCampo('fecha', iso);`, 'width:110px;padding:5px 8px;border:1px solid #ccc;border-radius:4px;font-size:12px;text-align:center')}
+        <label title="Destildá si esta carga NO tiene comprobante" style="display:flex;align-items:center;gap:5px;font-size:12px;color:#2E7D32;font-weight:600;cursor:pointer;white-space:nowrap">
+          <input type="checkbox" ${d.conFactura === false ? '' : 'checked'} onchange="setRepartoFacturaCampo('conFactura', this.checked)"> 🧾 con factura
+        </label>
       </div>
       ${tabla}
     </div>
@@ -11300,13 +11596,12 @@ function desgloseMaterialPorRubro(matKey, et){
     return pie > 0 ? (g('arena') + pie) : 0;   // los rubros de hormigón suman el volumen del elemento
   };
   if(!esAdic){
-    banco.forEach(row => {
-      const [cat, cod, desc, unid] = row;
-      if (IS_SUB.has(cod)) return;
-      const cant = parseFloat(cantidades[cod] || 0);
-      if (cant <= 0) return;
+    rubrosDelPresupuesto(tip).forEach(r => {
+      const cod = r.cod, desc = r.desc, unid = r.unid;
+      if (r.isSub) return;
+      const cant = r.cant;
       // et vacío o 'todas' = sin filtro (Adjudicados agrega todas las etapas)
-      if (et && et!=='todas' && (etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3') !== et) return;
+      if (et && et!=='todas' && r.et !== et) return;
       const receta = recetaVigente(cod);
       if (!receta) return;
       (receta.materiales||[]).forEach(item => {
@@ -11732,7 +12027,7 @@ function renderComprasMateriales() {
       <table class="tbl"><thead><tr><th>Material</th><th class="center">Necesario</th><th class="num">P. adj.</th><th class="center">Comprado</th><th class="center">Saldo cant.</th><th class="center">%</th><th class="num">Gasto real ₲</th><th class="num">Saldo ₲</th></tr></thead><tbody>${filas}</tbody></table></div></div>`;
   });
 
-  html = tarjetaFacturacion() + panelItemsManuales(['mat'], 'Materiales fuera del catálogo') + html;
+  html = tarjetaConciliacionGasto() + tarjetaFacturacion() + panelItemsManuales(['mat'], 'Materiales fuera del catálogo') + html;
 
   if (!hayItems) html+=`<div class="card"><div class="card-body"><div class="alert alert-warn">No hay materiales cargados en el Costeo todavía. Cargá cantidades en Costeo (Paso 3), agregá un Adicional, o cargá un ítem manual acá arriba.</div></div></div>`;
   else { const saldo=totalPpto-totalGastado;
@@ -11774,9 +12069,12 @@ function estadoFacturaLote(l) {
 
 // Recorre TODOS los lotes de la obra y los separa por estado de factura
 function resumenFacturacion() {
+  // 28/08/2026 — se saco el estado 'nd' (sin definir): ya no existe, el lote
+  // es con factura o sin factura, y las variables nd/nNd quedaban siempre en 0
+  // haciendo creer que habia un tercer grupo.
   const r = {
-    con: 0, sin: 0, nd: 0, total: 0,
-    nCon: 0, nSin: 0, nNd: 0,
+    con: 0, sin: 0, total: 0,
+    nCon: 0, nSin: 0,
     porTipo: { mat:{con:0,sin:0}, mo:{con:0,sin:0}, sub:{con:0,sin:0} }
   };
   Object.entries(ejecucion || {}).forEach(([ekey, e]) => {
@@ -11786,7 +12084,7 @@ function resumenFacturacion() {
       if (!monto) return;
       const est = estadoFacturaLote(l);
       r[est] += monto; r.total += monto;
-      if (est === 'con') r.nCon++; else if (est === 'sin') r.nSin++; else r.nNd++;
+      if (est === 'con') r.nCon++; else r.nSin++;
       if (r.porTipo[tipo]) r.porTipo[tipo][est] += monto;
     });
   });
@@ -11795,7 +12093,6 @@ function resumenFacturacion() {
   r.ivaPerdido = r.sin / IVA_DIVISOR;                       // el que no podés computar
   r.pctCon = r.total > 0 ? (r.con / r.total * 100) : 0;
   r.pctSin = r.total > 0 ? (r.sin / r.total * 100) : 0;
-  r.pctNd  = r.total > 0 ? (r.nd  / r.total * 100) : 0;
 
   // IVA que el presupuesto reservó para esta obra (bolsa IVA del índice de venta)
   try {
@@ -11878,10 +12175,21 @@ function tarjetaFacturacion(compacto) {
 
   return `<div class="card"><div class="card-header" style="background:#1D6F42">🧾 RESPALDO CON FACTURA E IVA</div>
     <div class="card-body">
-      <div style="display:flex;gap:22px;flex-wrap:wrap;font-size:12px">
+      <div style="display:flex;gap:22px;flex-wrap:wrap;font-size:12px;align-items:center">
         <div><span style="color:#666">Con factura:</span> <strong style="color:#2E7D32">₲ ${fmtN(Math.round(r.con))}</strong> <span style="color:#999">(${r.pctCon.toFixed(0)}% · ${r.nCon})</span></div>
         <div><span style="color:#666">Sin factura:</span> <strong style="color:#C05000">₲ ${fmtN(Math.round(r.sin))}</strong> <span style="color:#999">(${r.pctSin.toFixed(0)}% · ${r.nSin})</span></div>
-
+        <!-- 28/08/2026 — faltaba el TOTAL. La tarjeta mostraba "con factura" y
+             "sin factura" por separado y en ningun lado se sumaban, asi que la
+             plata sin factura parecia no entrar en ninguna cuenta. -->
+        <div style="margin-left:auto;background:#F1F5F0;border-radius:6px;padding:5px 12px">
+          <span style="color:#666;font-size:11px">Total comprado</span>
+          <strong style="color:#1C1C1C;font-size:15px;margin-left:6px">₲ ${fmtN(Math.round(r.total))}</strong>
+        </div>
+      </div>
+      <div style="font-size:10.5px;color:#999;margin-top:5px">
+        Toda la obra: materiales + mano de obra + subcontratos, de las cuatro etapas.
+        <strong>No depende del filtro de etapa</strong> ni de la sección en la que estés,
+        así que no tiene por qué coincidir con el resumen verde del pie de esta pantalla.
       </div>
       ${barra}
       <div style="display:flex;gap:22px;flex-wrap:wrap;align-items:center;padding-top:10px;border-top:1px solid #eee;font-size:12px">
@@ -12139,7 +12447,7 @@ function renderCertificacion() {
     container.innerHTML = panelManual + `<div class="card"><div class="card-body"><div class="alert alert-warn">No hay mano de obra ni subcontratos cargados en el Costeo todavía. Cargá cantidades en Costeo (Paso 3), agregá un Adicional, o cargá un ítem manual acá arriba.</div></div></div>`;
     return;
   }
-  html = tarjetaFacturacion() + panelManual + html;
+  html = tarjetaConciliacionGasto() + tarjetaFacturacion() + panelManual + html;
 
   // Retención global (% o monto) sobre el total ejecutado
   const retModo = certRet.modo || 'pct';
@@ -12220,6 +12528,19 @@ function getItemsAdjudicables(filtroEtapa) {
       moAcum[id].cant += m.cant;
     });
     d.sub.forEach(s => {
+      // 28/08/2026 — antes solo se creaba la entrada la primera vez y NUNCA se
+      // acumulaba la cantidad entre etapas (mat y mo si lo hacian). Un
+      // subcontrato presente en C2 y C3 se adjudicaba con la cantidad de una
+      // sola etapa. Ahora se suma cantidad y costo, y el precio unitario sale
+      // del promedio ponderado real.
+      if (subAcum[s.cod]) {
+        const cAdd = (parseFloat(s.cant) > 0) ? parseFloat(s.cant) : 1;
+        const prev = subAcum[s.cod];
+        const costoPrev = prev.precioRef * prev.cant;
+        prev.cant += cAdd;
+        prev.precioRef = prev.cant > 0 ? (costoPrev + (s.costo || 0)) / prev.cant : 0;
+        return;
+      }
       if (!subAcum[s.cod]) {
         // 12/08/2026 — FIX Adjudicados/Comparativo de subcontratos.
         // Antes: precioRef = s.costo, que es el costo TOTAL del subcontrato
@@ -12575,22 +12896,38 @@ function pdfCertificacion(tipo) {
 // ════════════════════════════════════════════════════════
 // FLUJO DE CAJA — por etapa: cobros (manual) vs egresos (auto)
 // ════════════════════════════════════════════════════════
-function egresosPorEtapa() {
-  // Egreso REAL por etapa. Es la única definición: la usan el Flujo de Caja,
-  // el Dashboard del proyecto y el Dashboard global. Si cada uno sumara a su
-  // manera, los tres mostrarían números distintos de la misma obra.
-  //
-  // Incluye:
-  //   · los lotes cargados (compras y certificaciones)
-  //   · los lotes huérfanos, de rubros que después se sacaron del cómputo
-  //   · el saldo de adelantos todavía no amortizado
+// ════════════════════════════════════════════════════════
+// GASTO REAL DE LA OBRA — UNA SOLA DEFINICION  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Antes habia tres cuentas distintas para el mismo dinero:
+//   · Compras y Certificacion sumaban solo Σ gastoRealEjec() de los items que
+//     estaban en pantalla (y Compras, ademas, solo materiales de la etapa
+//     filtrada).
+//   · egresosPorEtapa() sumaba eso MAS los items manuales sin lote, los lotes
+//     huerfanos y el saldo de adelantos.
+//   · costoRealEjecutadoProyecto() (Dashboard global) no tenia los items
+//     manuales sin lote.
+// Resultado: tres pantallas mostraban tres numeros para la misma obra.
+//
+// Ahora hay una sola funcion y devuelve el DESGLOSE, no solo el total, para que
+// Compras pueda mostrar por que su numero de materiales no es el total de obra.
+//
+// Que entra:
+//   lotes            compras y certificaciones cargadas
+//   manualesSinLote  items fuera de catalogo con monto declarado y sin compra
+//   huerfanos        compras de rubros que despues salieron del computo
+//   adelantos        adelantos entregados y todavia no amortizados
+// ════════════════════════════════════════════════════════
+function gastoRealObra() {
   const data = calcularNecesidades();
-  const eg = { C1:0, C2:0, C3:0, R:0 };
+  const eg  = { C1:0, C2:0, C3:0, R:0 };
+  const det = { lotes:0, manualesSinLote:0, huerfanos:0, adelantos:0 };
   const contadas = new Set();
 
   const sumar = (ekey, pUnit, et) => {
     contadas.add(ekey);
-    eg[et] += gastoRealEjec(ekey, pUnit);
+    const g = gastoRealEjec(ekey, pUnit);
+    eg[et] += g; det.lotes += g;
   };
 
   ['C1','C2','C3','R'].forEach(et => {
@@ -12614,18 +12951,11 @@ function egresosPorEtapa() {
     const et = ekey.split('@')[1];
     if (!et || eg[et] === undefined) return;
     const gasto = gastoRealEjec(ekey, 0);
-    if (gasto) eg[et] += gasto;
+    if (gasto) { eg[et] += gasto; det.huerfanos += gasto; }
   });
 
-  // ── ÍTEMS FUERA DE CATÁLOGO SIN LOTES (FIX ago2026) ─────────────────────
-  // El panel de ítems manuales se usa para anotar plata que YA salió: alquiler
-  // de andamio, flete, una changa puntual. Pero el sistema lo leía como "esto
-  // lo voy a gastar" y esperaba además que se registrara la compra abajo. Si no
-  // se registraba, el gasto quedaba cargado y no salía por ningún lado.
-  //
-  // Ahora, si el ítem no tiene ninguna compra registrada, su monto declarado
-  // (cantidad × precio) ES el egreso. Si después se le cargan lotes, mandan los
-  // lotes y esto no suma: ese gasto ya vino contado más arriba.
+  // Ítems fuera de catálogo SIN lotes: el monto declarado ES el egreso.
+  // Si después se le cargan lotes, mandan los lotes y esto no suma.
   (itemsManuales || []).forEach(it => {
     if (!it || !it.tipo) return;
     const et = it.etapa || 'C1';
@@ -12634,18 +12964,63 @@ function egresosPorEtapa() {
     const e = ejecucion[ekeyIM];
     if (e && e.lotes && e.lotes.length) return;   // ya contado como compra real
     const monto = (parseFloat(it.cant) || 0) * (parseFloat(it.precio) || 0);
-    if (monto > 0) eg[et] += monto;
+    if (monto > 0) { eg[et] += monto; det.manualesSinLote += monto; }
   });
 
   // Adelantos sin amortizar: plata entregada sin trabajo ejecutado. Lo ya
   // amortizado NO se suma acá, porque viene contado dentro de los lotes.
   if (typeof saldoAdelantosPorEtapa === 'function') {
     const adl = saldoAdelantosPorEtapa();
-    ['C1','C2','C3','R'].forEach(et => { eg[et] += (adl[et] || 0); });
+    ['C1','C2','C3','R'].forEach(et => {
+      const v = adl[et] || 0;
+      eg[et] += v; det.adelantos += v;
+    });
   }
 
-  return eg;
+  const total = eg.C1 + eg.C2 + eg.C3 + eg.R;
+  return { porEtapa: eg, detalle: det, total };
 }
+
+// Compatibilidad: el Flujo de Caja y los dashboards siguen pidiendo el mapa por
+// etapa. Es la misma cuenta, no una paralela.
+function egresosPorEtapa() {
+  return gastoRealObra().porEtapa;
+}
+
+// ── Tarjeta de conciliación: por qué Compras no es el total de obra ──
+// Compras muestra materiales; Certificación muestra MO y subcontratos; el Flujo
+// muestra todo. Esta tarjeta hace explícito el puente entre los tres números,
+// en vez de dejar que Monica los compare a ojo y no cierren.
+function tarjetaConciliacionGasto() {
+  let r;
+  try { r = gastoRealObra(); } catch(e) { return ''; }
+  const d = r.detalle;
+  const extras = d.manualesSinLote + d.huerfanos + d.adelantos;
+  if (!r.total) return '';
+
+  const fila = (lbl, val, nota, color) => !val ? '' : `<tr style="border-bottom:1px solid #f5f5f5">
+    <td style="padding:5px 9px;font-size:12px">${lbl}<div style="font-size:10px;color:#999">${nota}</div></td>
+    <td class="num" style="font-size:12px;font-weight:600;color:${color||'#555'}">${fmtN(Math.round(val))}</td></tr>`;
+
+  return `<div class="card"><div class="card-header" style="background:#37474F">🧮 SALIDA TOTAL DE OBRA — cómo se compone</div>
+    <div class="card-body" style="padding:0">
+      <table class="tbl" style="width:100%"><tbody>
+        ${fila('Compras y certificaciones cargadas', d.lotes, 'los lotes que ves en esta pantalla y en Certificación', '#1565C0')}
+        ${fila('Ítems fuera de catálogo sin compra registrada', d.manualesSinLote, 'monto declarado en el panel ✋, todavía sin lote cargado', '#C05000')}
+        ${fila('Compras de rubros que ya no están en el cómputo', d.huerfanos, 'plata que salió por rubros después puestos en cantidad 0 — revisá con 🧹 Limpiar huérfanas', '#C00000')}
+        ${fila('Adelantos entregados sin amortizar', d.adelantos, 'entregados a contratistas y todavía sin trabajo certificado', '#6A1B9A')}
+        <tr style="background:#E8F0E5;font-weight:800">
+          <td style="padding:9px">TOTAL — es el que muestra el Flujo de Caja y el Dashboard</td>
+          <td class="num" style="font-size:14px">₲ ${fmtN(Math.round(r.total))}</td></tr>
+      </tbody></table>
+      <div style="padding:8px 12px;font-size:11px;color:#666;background:#FAFAFA;border-top:1px solid #eee">
+        ${extras > 0
+          ? 'El resumen de <strong>Compras</strong> de abajo suma solo los <strong>materiales</strong> de la etapa filtrada, y el de <strong>Certificación</strong> solo mano de obra y subcontratos. Por eso ninguno de los dos da este total: la diferencia son las líneas naranjas, violetas y rojas de arriba.'
+          : 'No hay ítems sin compra registrada, ni compras huérfanas, ni adelantos pendientes: el total de obra es exactamente lo cargado como lotes.'}
+      </div>
+    </div></div>`;
+}
+
 
 function setCobroReal(et, val) {
   const nuevo = parseFloat(val)||0;
@@ -12668,8 +13043,7 @@ function costoAdicByEtapa() {
   (adicionales||[]).forEach(ad => {
     if (ad.tipo !== 'cliente') return;
     const row = getBancoRow(ad.cod); if (!row) return;
-    const mat = tip === 'superior' ? row[5] : row[4];
-    const mo  = tip === 'superior' ? row[7] : row[6];
+    const { mat, mo } = costoUnitVigente(ad.cod, tip);
     const costo = parseFloat(ad.cant||0) * (mat + mo);
     const et = ad.etapa || 'C3';
     out[et] = (out[et]||0) + costo;
@@ -12970,24 +13344,20 @@ function rubrosOfertaPorEtapa() {
   // hacían que el detalle sumara menos que el TOTAL. Ver factorVentaRubros().
   const factor = factorVentaRubros();
   const res = { C1:[], C2:[], C3:[], R:[] };
-  banco.forEach(row => {
-    const [cat, cod, desc] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod]||0);
-    const sub = parseFloat(subcontratos[cod]||0);
-    if (cant<=0 && !(isSub&&sub>0)) return;
-    const mat = tip==='superior'?row[5]:row[4];
-    const mo = tip==='superior'?row[7]:row[6];
-    const costo = isSub ? sub : cant*(mat+mo);
-    const venta = costo*factor;
-    const et = etapaRubro[cod]||ETAPA_AUTO[cod]||'C3';
-    (res[et]=res[et]||[]).push({ cat, desc, monto:venta });
+  // 28/08/2026 — dos defectos corregidos de una:
+  //  · leia `banco` + `cantidades` en vivo aunque la obra estuviera aprobada,
+  //    asi que listaba rubros que no estaban en el presupuesto congelado (y que
+  //    por eso no aparecian en Adjudicados ni en Compras).
+  //  · resolvia el subcontrato con `subcontratos[cod]` directo: uno con precio
+  //    de REFERENCIA daba 0 y desaparecia entero de la Certificacion al Cliente.
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const venta = r.costo * factor;
+    (res[r.et] = res[r.et] || []).push({ cat:r.cat, desc:r.desc, monto:venta });
   });
   // Adicionales cliente (se cobran aparte, con su margen)
   (adicionales||[]).filter(a=>a&&a.tipo==='cliente'&&a.cod).forEach(ad=>{
     const r = getBancoRow(ad.cod); if(!r) return;
-    const mat = tip==='superior'?r[5]:r[4];
-    const mo = tip==='superior'?r[7]:r[6];
+    const { mat, mo } = costoUnitVigente(ad.cod, tip);
     const cant = parseFloat(ad.cant)||0;
     const margenAd = (ad.margen!==undefined&&ad.margen!==null&&ad.margen!=='')?parseFloat(ad.margen):50;
     const venta = cant*(mat+mo)*(1+margenAd/100);
@@ -13184,7 +13554,20 @@ function costoRealEjecutadoProyecto(p) {
       total += (parseFloat(e.val) || 0) * pAdj;
     }
   });
-  // Mismo criterio que egresosPorEtapa(): el adelanto sin amortizar también
+  // ── ÍTEMS FUERA DE CATÁLOGO SIN LOTES (FIX 28/08/2026) ──────────────────
+  // Faltaba acá y sí estaba en gastoRealObra(): el Dashboard global mostraba
+  // menos gasto que el Flujo de Caja de la misma obra, por el monto declarado
+  // de los ítems manuales a los que todavía no se les cargó la compra.
+  (p.itemsManuales || []).forEach(it => {
+    if (!it || !it.tipo) return;
+    const ekeyIM = it.tipo + ':manual#' + it.id + '@' + (it.etapa || 'C1');
+    const e = ejec[ekeyIM];
+    if (e && e.lotes && e.lotes.length) return;   // ya contado como compra real
+    const monto = (parseFloat(it.cant) || 0) * (parseFloat(it.precio) || 0);
+    if (monto > 0) total += monto;
+  });
+
+  // Mismo criterio que gastoRealObra(): el adelanto sin amortizar también
   // es plata que salió. Sin esto, el Dashboard global mostraba menos gasto
   // que el del proyecto para la misma obra.
   total += saldoAdelantosProyecto(p);
@@ -15317,12 +15700,8 @@ function calcularAvanceObra(){
   // Si un rubro todavía no tiene dato real cargado, se usa su dato del plan como referencia
   // para no mostrar 0 mientras se va cargando el seguimiento.
   let maxDia = 0;
-  banco.forEach(row => {
-    const cod = row[1];
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    if (cant <= 0 && !(isSub && sub > 0)) return;
+  rubrosDelPresupuesto().forEach(r => {
+    const cod = r.cod;
     const c = cronogramaReal[cod] || cronograma[cod];
     if (c) maxDia = Math.max(maxDia, (c.inicioDia||1) + (c.duracionDias||1) - 1);
   });
@@ -15748,13 +16127,8 @@ function renderInformeComparativo() {
 
   // Recolectar rubros activos
   const rubros = [];
-  banco.forEach(row => {
-    const [cat, cod, desc] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod);
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-    rubros.push({ cat, cod, desc });
+  rubrosDelPresupuesto().forEach(r => {
+    rubros.push({ cat:r.cat, cod:r.cod, desc:r.desc });
   });
 
   if (rubros.length === 0) {
@@ -16053,16 +16427,9 @@ function renderOfertaPreview() {
       <tbody>`;
 
   let prevCat = ''; let n = 0; let itemN = 0;
-  banco.forEach(row => {
-    const [cat, cod, desc, unid, mb, ms, mob, mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod] || 0);
-    const sub = subTotal(cod, tip);
-    if (cant <= 0 && !(isSub && sub > 0)) return;
-
-    const mat = tip === 'superior' ? ms : mb;
-    const mo  = tip === 'superior' ? mos : mob;
-    const costoRubro = isSub ? sub : cant * (mat + mo);
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cat = r.cat, cod = r.cod, desc = r.desc, unid = r.unid, cant = r.cant;
+    const costoRubro = r.costo;
     const precioRubro = Math.round(costoRubro * factor);
     const precioUnit = cant > 0 ? Math.round(precioRubro / cant) : precioRubro;
 
@@ -16220,14 +16587,9 @@ function renderMiniGantt(containerId, totalSemanas) {
     const color = etapaColors[et];
     let rubrosEtapa = [];
 
-    banco.forEach(row => {
-      const [cat, cod, desc] = row;
-      const isSub = IS_SUB.has(cod);
-      const cant = parseFloat(cantidades[cod] || 0);
-      const sub = subTotal(cod, tip);
-      if (cant <= 0 && !(isSub && sub > 0)) return;
-      const etRubro = etapaRubro[cod] || ETAPA_AUTO[cod] || 'C3';
-      if (etRubro !== et) return;
+    rubrosDelPresupuesto(tip).forEach(r => {
+      const cod = r.cod, desc = r.desc;
+      if (r.et !== et) return;
       const crono = cronograma[cod];
       if (!crono) return;
       const inicioSem = Math.ceil((crono.inicioDia || 1) / diasLaboralesSem);
@@ -16517,8 +16879,7 @@ function renderTablaAdicionales() {
   adicionales.forEach(ad => {
     try {
       const row = getBancoRow(ad.cod);
-      const mat = row ? (tip === 'superior' ? row[5] : row[4]) : 0;
-      const mo  = row ? (tip === 'superior' ? row[7] : row[6]) : 0;
+      const { mat, mo } = costoUnitVigente(ad.cod, tip);
       const costo = parseFloat(ad.cant || 0) * (mat + mo);
       const margen = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
       // Cliente: se cobra costo + margen. Corrección: solo costo (ajusta tu costo interno).
@@ -16601,16 +16962,12 @@ function exportarExcel() {
   const tip = document.getElementById('p-tipologia')?.value || 'basico';
   let csv = 'Código,Descripción,Unidad,Cantidad,Mat.Unit,MO.Unit,Total\n';
   let prevCat='';
-  banco.forEach(row => {
-    const [cat,cod,desc,unid,mb,ms,mob,mos] = row;
-    const isSub = IS_SUB.has(cod);
-    const cant = parseFloat(cantidades[cod]||0);
-    if (cant<=0 && !IS_SUB.has(cod)) return;
-    const sub = parseFloat(subcontratos[cod]||0);
-    if (isSub && sub<=0) return;
-    const mat = tip==='superior'?ms:mb;
-    const mo  = tip==='superior'?mos:mob;
-    const tot = isSub ? sub : cant*(mat+mo);
+  // 28/08/2026 — tenia los dos defectos juntos: leia el Banco de HOY aunque la
+  // obra estuviera aprobada, y resolvia el subcontrato con `subcontratos[cod]`
+  // directo, asi que uno con precio de REFERENCIA salia exportado en 0.
+  rubrosDelPresupuesto(tip).forEach(r => {
+    const cat=r.cat, cod=r.cod, desc=r.desc, unid=r.unid, isSub=r.isSub, cant=r.cant;
+    const mat=r.mat, mo=r.mo, tot=r.costo;
     if (cat!==prevCat) { csv+=`\n${cat}\n`; prevCat=cat; }
     csv+=`${cod},"${desc}",${unid},${cant},${isSub?'SUB':mat},${isSub?'':mo},${Math.round(tot)}\n`;
   });
@@ -18336,6 +18693,13 @@ document.addEventListener('DOMContentLoaded', () => {
   actualizarProyecto();      // inicializa la barra de proyecto activo
   renderListaProyectos();    // muestra la lista de proyectos guardados al arrancar
   refrescarDatalistsCP();    // autocompletar de Cliente/Proveedor en Presupuesto, Gabinete y Adjudicados
+  // Si no hay sesión/nube (uso local), igual sellamos las obras aprobadas.
+  // La reparación del Banco NO corre acá: sin haber bajado la nube, podríamos
+  // estar empujando una copia local vieja.
+  setTimeout(() => {
+    try { if (typeof mantenimientoAutomaticoAXO === 'function') mantenimientoAutomaticoAXO({ conNube:false }); } catch(e){}
+  }, 12000);
+
   // Barra de acciones del presupuesto: visible solo si la pestaña activa es del grupo Presupuesto
   try {
     const _activa = document.querySelector('.page.active');
@@ -18946,7 +19310,7 @@ function generarEspecificacionTecnica() {
 
   // Rubros del proyecto: cantidades>0 + adicionales
   const codsProyecto = new Set();
-  banco.forEach(row => { const cod = row[1]; if (parseFloat(cantidades[cod] || 0) > 0) codsProyecto.add(cod); });
+  rubrosDelPresupuesto().forEach(r => codsProyecto.add(r.cod));
   (adicionales || []).forEach(a => { if (a && a.cod) codsProyecto.add(a.cod); });
 
   let cuerpo = ''; let prevCat = ''; let count = 0;
