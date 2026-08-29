@@ -831,6 +831,7 @@
         🔧 <strong>Corrección de Cómputo</strong>: ajuste de una cantidad mal calculada — afecta tu costo interno, no genera cobro extra.
       </div>
       <button class="btn btn-primary btn-sm" onclick="agregarLineaAdicional()">➕ Agregar línea</button>
+      <button class="btn btn-sm" style="background:#C05000;color:#fff;border:none" onclick="agregarLineaAdicionalManual()" title="Para un trabajo que no está en el Banco de Precios: le ponés nombre, unidad y precio a mano">✋ Agregar adicional manual</button>
       <div style="overflow-x:auto;margin-top:12px">
         <table class="tbl" id="tabla-adicionales"></table>
       </div>
@@ -6274,7 +6275,7 @@ function capturarPreciosInsumosVivos(tip) {
   banco.forEach(row => {
     if (parseFloat(cantidades[row[1]] || 0) > 0) rubrosUsados.add(row[1]);
   });
-  adicionales.forEach(ad => rubrosUsados.add(ad.cod));
+  adicionales.forEach(ad => { if (ad && ad.cod) rubrosUsados.add(ad.cod); });
 
   rubrosUsados.forEach(cod => {
     if (IS_SUB.has(cod)) {
@@ -7434,6 +7435,37 @@ function cantVigenteRubro(cod) {
   return parseFloat(cantidades[cod] || 0);
 }
 
+// ════════════════════════════════════════════════════════
+// ADICIONALES MANUALES  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Hasta ahora un adicional tenia que existir en el Banco de Precios: se elegia
+// de la lista de rubros y listo. Pero una obra genera trabajos que no estan en
+// el catalogo y que no vale la pena darles de alta como rubro.
+//
+// Un adicional MANUAL lleva `manual:true` + nombre, unidad y precio unitario
+// propios. Todo lo demas (cantidad, tipo cliente/correccion, etapa, margen)
+// funciona igual. Esta funcion es la unica puerta: devuelve descripcion, unidad
+// y costo unitario de CUALQUIER adicional, sea del banco o manual, para que
+// ninguna pantalla tenga que preguntarse de que tipo es.
+// ════════════════════════════════════════════════════════
+function adicInfo(ad, tip) {
+  tip = tip || document.getElementById('p-tipologia')?.value || 'basico';
+  if (!ad) return { ok:false, mat:0, mo:0 };
+  if (ad.manual) {
+    const precio = parseFloat(ad.precio) || 0;
+    return { ok:true, manual:true, esSub:false,
+             desc: (ad.nombre || '(adicional sin nombre)'),
+             unid: ad.unidad || 'gl',
+             cat: 'ADICIONALES',
+             mat: precio, mo: 0 };
+  }
+  const row = getBancoRow(ad.cod);
+  if (!row) return { ok:false, mat:0, mo:0 };
+  const c = costoUnitVigente(ad.cod, tip);
+  return { ok:true, manual:false, esSub: IS_SUB.has(ad.cod),
+           desc: row[2], unid: row[3], cat: row[0], mat: c.mat, mo: c.mo };
+}
+
 function costoUnitVigente(cod, tip) {
   tip = tip || document.getElementById('p-tipologia')?.value || 'basico';
 
@@ -7676,11 +7708,12 @@ function calcular() {
   }
 
   adicionales.forEach(ad => {
-    const row = getBancoRow(ad.cod);
-    if (!row) return;
     // 28/08/2026 — precio VIGENTE del proyecto (congelado si la obra esta
-    // aprobada), no el del Banco de hoy. Ver costoUnitVigente().
-    const { mat, mo } = costoUnitVigente(ad.cod, tip);
+    // aprobada), no el del Banco de hoy. Los adicionales manuales traen su
+    // propio precio. Ver adicInfo() / costoUnitVigente().
+    const _ai = adicInfo(ad, tip);
+    if (!_ai.ok) return;
+    const mat = _ai.mat, mo = _ai.mo;
     const costo = parseFloat(ad.cant || 0) * (mat + mo);   // lo que pagás vos (insumos + MO)
     const yaContado = _adicYaEnSnapshot.has(String(ad.id));   // su costo ya vive dentro del cd congelado
 
@@ -8263,16 +8296,14 @@ function renderOfertaCosteo() {
     </tr>`;
     
     adicionalesCliente.forEach((ad, idx) => {
-      if (!ad || !ad.cod) return;
-      const bancoRow = getBancoRow(ad.cod);
-      if (!bancoRow) return;
-      
-      const { mat, mo } = costoUnitVigente(ad.cod, tip);
+      const _ai = adicInfo(ad, tip);
+      if (!_ai.ok) return;
+      const mat = _ai.mat, mo = _ai.mo;
       const cant = parseFloat(ad.cant) || 0;
       const margenAd = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
       const monto = cant * (mat + mo) * (1 + margenAd / 100);
-      const desc = bancoRow[2];
-      const unid = bancoRow[3];
+      const desc = _ai.desc;
+      const unid = _ai.unid;
       
       html += `<tr style="background:#FFFAF0;border-bottom:1px solid #FFE0B2">
         <td class="center">${idx + 1}</td>
@@ -9914,13 +9945,14 @@ function renderGantt() {
   });
 
   // ── ADICIONALES (sección aparte, naranja) ──────────────
-  const adicCliente = (adicionales || []).filter(a => a && a.tipo === 'cliente' && a.cod);
+  const adicCliente = (adicionales || []).filter(a => a && a.tipo === 'cliente' && (a.cod || a.manual));
   if (adicCliente.length > 0) {
     filas += `<tr><td colspan="${4 + totalUnidades}" style="background:#E65100;color:#fff;font-weight:700;font-size:12px;padding:7px 12px;letter-spacing:0.5px">➕ ADICIONALES <span style="color:rgba(255,255,255,0.85);font-weight:400;font-size:11px">(${adicCliente.length})</span></td></tr>`;
     adicCliente.forEach(ad => {
-      const bancoRow = getBancoRow(ad.cod);
-      if (!bancoRow) return;
-      const { mat, mo } = costoUnitVigente(ad.cod, tip);
+      const _ai = adicInfo(ad, tip);
+      if (!_ai.ok) return;
+      const bancoRow = _ai.manual ? [ '', '', _ai.desc, _ai.unid ] : getBancoRow(ad.cod);
+      const mat = _ai.mat, mo = _ai.mo;
       const cant = parseFloat(ad.cant) || 0;
       const margenAd = (ad.margen!==undefined && ad.margen!==null && ad.margen!=='') ? parseFloat(ad.margen) : 50;
       const costoAd = cant * (mat + mo);
@@ -10142,6 +10174,14 @@ function pctCompradoRubro(cod, et, tip, necesidadesEtapa) {
   return pctCompradoDeReceta(receta, cant, et, tip, necesidadesEtapa, '');
 }
 function pctCompradoAdicional(ad, et, tip, necesidadesEtapa) {
+  if (ad && ad.manual) {
+    const cantM = parseFloat(ad.cant) || 0;
+    const precM = parseFloat(ad.precio) || 0;
+    const costoM = cantM * precM;
+    if (costoM <= 0) return null;
+    const gastadoM = gastoRealEjec('mat:adicm#'+ad.id+'@'+et, precM);
+    return Math.min(100, Math.round(gastadoM / costoM * 100));
+  }
   if (IS_SUB.has(ad.cod)) {
     const bancoRow = getBancoRow(ad.cod); if (!bancoRow) return null;
     const { mat, mo } = costoUnitVigente(ad.cod, tip);
@@ -10317,12 +10357,13 @@ function renderGanttReal() {
   });
 
   // ── ADICIONALES en cronograma real ──
-  const adicClienteR = (adicionales || []).filter(a => a && a.tipo === 'cliente' && a.cod);
+  const adicClienteR = (adicionales || []).filter(a => a && a.tipo === 'cliente' && (a.cod || a.manual));
   if (adicClienteR.length > 0) {
     filas += `<tr><td colspan="${5 + totalSemanas}" style="background:#E65100;color:#fff;font-weight:700;font-size:12px;padding:7px 12px">➕ ADICIONALES (${adicClienteR.length})</td></tr>`;
     adicClienteR.forEach(ad => {
-      const bancoRow = getBancoRow(ad.cod); if (!bancoRow) return;
-      const { mat, mo } = costoUnitVigente(ad.cod, tip);
+      const _ai = adicInfo(ad, tip); if (!_ai.ok) return;
+      const bancoRow = _ai.manual ? [ '', '', _ai.desc, _ai.unid ] : getBancoRow(ad.cod);
+      const mat = _ai.mat, mo = _ai.mo;
       const cant = parseFloat(ad.cant)||0;
       const etAd = ad.etapa || etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
       const pctCompradoAd = pctCompradoAdicional(ad, etAd, tip, necesidadesData[etAd]);
@@ -10466,7 +10507,7 @@ function calcularNecesidades() {
   // los motivos por los que Compras nunca cerraba contra el Flujo.
   // Una correccion es trabajo real que hay que ejecutar: entra al computo de
   // necesidades igual que un adicional, marcada con 🔧 para no confundirla.
-  (adicionales || []).filter(a=>a&&(a.tipo==='cliente'||a.tipo==='correccion')&&a.cod).forEach(ad => {
+  (adicionales || []).filter(a=>a&&(a.tipo==='cliente'||a.tipo==='correccion')&&(a.cod||a.manual)).forEach(ad => {
     const cant = parseFloat(ad.cant) || 0;
     if (cant <= 0) return;
     const esCorr = ad.tipo === 'correccion';
@@ -10475,6 +10516,20 @@ function calcularNecesidades() {
     const et = ad.etapa || etapaRubro[ad.cod] || ETAPA_AUTO[ad.cod] || 'C3';
     const bucket = etapas[et] || etapas.C3;
     const sufijo = '#adic:'+ad.id; // clave única por adicional/corrección
+
+    // Adicional MANUAL: no tiene receta ni rubro. Entra como un material propio,
+    // con su nombre y su precio, para que se pueda comprar, certificar y seguir
+    // en el Flujo igual que cualquier otro — mismo motor de lotes.
+    if (ad.manual) {
+      const precioM = parseFloat(ad.precio) || 0;
+      bucket.mat['adicm#'+ad.id] = {
+        nombre: ico + (ad.nombre || '(adicional sin nombre)') + sfx,
+        unidad: ad.unidad || 'gl',
+        cant, precio: precioM, costo: cant * precioM,
+        adic: true, correccion: esCorr, manual: true
+      };
+      return;
+    }
     if (IS_SUB.has(ad.cod)) {
       const bancoRow = getBancoRow(ad.cod);
       const { mat, mo } = costoUnitVigente(ad.cod, tip);
@@ -10633,7 +10688,8 @@ function panelItemsManuales(tipos, titulo) {
       <td class="num" style="font-size:11px;color:#666">${fmtN(Math.round(ppto))}</td>
       <td class="num" style="font-size:11px;font-weight:600;color:#1565C0">${fmtN(Math.round(gastado))}</td>
       <td class="center"><button onclick="delItemManual('${it.id}')" style="border:none;background:#fee;color:#C00;border-radius:4px;cursor:pointer;padding:2px 8px;font-size:11px">✕</button></td>
-    </tr>`;
+    </tr>
+    <tr><td colspan="7" style="padding:0">${renderLotePanel(ekey, parseFloat(it.precio)||0, '', it.unidad || 'gl', '#C05000')}</td></tr>`;
   });
 
   const selTipo = tipos.length > 1
@@ -11992,7 +12048,10 @@ function renderComprasMateriales() {
     // y solo trae materiales con cantidad>0 en el Costeo (más adicionales), así que se puede
     // comprar directo. Si el material tiene un ganador en Adjudicados se usa ese precio/proveedor
     // como valor de referencia; si no, se usa el precio del Banco y el proveedor queda libre por lote.
-    const mats = Object.entries(d.mat);
+    // 28/08/2026 — los ítems ✋ ya no se repiten acá: viven en su propio panel
+    // de arriba, que ahora trae el cargador de compras completo (proveedor,
+    // fecha, tilde de factura y edición). Antes aparecían en los dos lados.
+    const mats = Object.entries(d.mat).filter(([id]) => String(id).indexOf('manual#') !== 0);
     if (!mats.length) return;
     hayItems=true;
     let filas='';
@@ -12030,6 +12089,16 @@ function renderComprasMateriales() {
   html = tarjetaConciliacionGasto() + tarjetaFacturacion() + panelItemsManuales(['mat'], 'Materiales fuera del catálogo') + html;
 
   if (!hayItems) html+=`<div class="card"><div class="card-body"><div class="alert alert-warn">No hay materiales cargados en el Costeo todavía. Cargá cantidades en Costeo (Paso 3), agregá un Adicional, o cargá un ítem manual acá arriba.</div></div></div>`;
+  // Los ítems ✋ ya no están en las tablas de arriba, pero su presupuesto y su
+  // gasto siguen siendo parte del total de materiales de la obra.
+  (itemsManuales || []).filter(x => x && x.tipo === 'mat').forEach(it => {
+    const ekeyIM = 'mat:manual#' + it.id + '@' + (it.etapa || 'C1');
+    totalPpto    += (parseFloat(it.cant) || 0) * (parseFloat(it.precio) || 0);
+    totalGastado += gastoRealEjec(ekeyIM, parseFloat(it.precio) || 0);
+    hayItems = true;
+  });
+
+  if (!hayItems) {} 
   else { const saldo=totalPpto-totalGastado;
     html+=`<div class="card"><div class="card-body" style="background:#E8F0E5;display:flex;gap:24px;flex-wrap:wrap;align-items:center">
       <div><span style="font-size:11px;color:#666">Presupuesto materiales:</span> <strong style="color:#4A6741">₲ ${fmtN(Math.round(totalPpto))}</strong></div>
@@ -12229,31 +12298,90 @@ function certificadoPorProveedor() {
   return acc;
 }
 
+// ════════════════════════════════════════════════════════
+// AMORTIZACIÓN DE ADELANTOS — POR FECHA  (28/08/2026)
+// ────────────────────────────────────────────────────────
+// Antes: cada adelanto se amortizaba contra TODO lo certificado a ese
+// contratista en la historia de la obra, sin mirar cuándo. Eso hacía que un
+// adelanto nuevo se "comiera" trabajo que ya se había certificado y pagado
+// aparte — y como lo amortizado no se vuelve a sumar al Flujo, el sistema
+// terminaba escondiendo plata que sí salió de caja:
+//
+//   certificado 4M (ya pagado) + adelanto 5M  →  el sistema mostraba 5M
+//   de salida en vez de 9M, porque daba 4M del adelanto por amortizados.
+//
+// Regla nueva: un adelanto es plata a cuenta de trabajo FUTURO, así que solo
+// se amortiza con certificaciones de fecha IGUAL O POSTERIOR a la del adelanto.
+// Cada certificación se consume una sola vez, de la más vieja a la más nueva,
+// y los adelantos se atienden del más viejo al más nuevo.
+//
+// Una certificación SIN fecha no se asume de nadie: no amortiza sola. El tilde
+// 🔓 de cada adelanto salta la regla y le deja usar cualquier certificación,
+// para los casos puntuales que no siguen el orden cronológico.
+// ════════════════════════════════════════════════════════
+function certificadosConFechaPorProveedor(ejec) {
+  const acc = {};
+  Object.entries(ejec || {}).forEach(([ekey, e]) => {
+    const tipo = ekey.split(':')[0];
+    if (tipo !== 'mo' && tipo !== 'sub') return;
+    (e.lotes || []).forEach(l => {
+      const prov = (l.prov || '').trim();
+      if (!prov) return;
+      const monto = (parseFloat(l.cant) || 0) * (parseFloat(l.precio) || 0);
+      if (!monto) return;
+      (acc[prov] = acc[prov] || []).push({ fecha: l.fecha || '', monto, restante: monto });
+    });
+  });
+  Object.values(acc).forEach(arr => arr.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||'')));
+  return acc;
+}
+
+// Reparte UN adelanto sobre las certificaciones disponibles de su contratista.
+// Devuelve cuánto se pudo amortizar. Muta `restante` de cada certificación.
+function _amortizarAdelanto(ad, lotes) {
+  const monto = parseFloat(ad.monto) || 0;
+  const forzar = ad.amortizaTodo === true;   // tilde 🔓: ignora la regla de fecha
+  const fAd = ad.fecha || '';
+  let falta = monto;
+  (lotes || []).forEach(l => {
+    if (falta <= 0 || l.restante <= 0) return;
+    if (!forzar) {
+      if (!l.fecha || !fAd) return;   // sin fecha no se asume nada
+      if (l.fecha < fAd) return;      // certificación anterior al adelanto: ya estaba saldada
+    }
+    const usa = Math.min(falta, l.restante);
+    l.restante -= usa;
+    falta -= usa;
+  });
+  return monto - falta;
+}
+
 // Estado por contratista + amortización FIFO por fecha de cada adelanto
 function estadoAdelantos() {
   const cert = certificadoPorProveedor();
+  const certLotes = certificadosConFechaPorProveedor(ejecucion);
   const porProv = {};
 
   const lista = (adelantos || []).slice().sort((a, b) => (a.fecha || '').localeCompare(b.fecha || ''));
   lista.forEach(ad => {
     const prov = (ad.prov || '').trim() || '(sin proveedor)';
-    if (!porProv[prov]) porProv[prov] = { prov, adelantado: 0, certificado: cert[prov] || 0, amortizado: 0, saldo: 0, items: [] };
+    if (!porProv[prov]) porProv[prov] = { prov, adelantado: 0, certificado: cert[prov] || 0, amortizado: 0, saldo: 0, items: [], sinFecha: 0 };
     porProv[prov].adelantado += parseFloat(ad.monto) || 0;
     porProv[prov].items.push(ad);
   });
 
-  // Cada contratista amortiza hasta donde le alcance lo certificado
+  // Cada adelanto se amortiza solo con certificaciones posteriores a su fecha
   Object.values(porProv).forEach(p => {
-    let disponible = p.certificado;
+    const lotes = certLotes[p.prov] || [];
     p.items.forEach(ad => {
-      const monto = parseFloat(ad.monto) || 0;
-      const amort = Math.min(monto, Math.max(0, disponible));
+      const amort = _amortizarAdelanto(ad, lotes);
       ad._amortizado = amort;
-      ad._saldo = monto - amort;
-      disponible -= amort;
+      ad._saldo = (parseFloat(ad.monto) || 0) - amort;
       p.amortizado += amort;
     });
     p.saldo = p.adelantado - p.amortizado;
+    // certificaciones sin fecha que quedaron sin usar: se avisa, no se asume
+    p.sinFecha = lotes.filter(l => !l.fecha && l.restante > 0).reduce((a,l)=>a+l.restante, 0);
   });
 
   const tot = { adelantado: 0, certificado: 0, amortizado: 0, saldo: 0 };
@@ -12315,7 +12443,9 @@ function delAdelanto(id) {
 function setAdelanto(id, campo, val) {
   const ad = (adelantos || []).find(x => x && x.id === id);
   if (!ad) return;
-  ad[campo] = (campo === 'monto') ? (parseFloat(val) || 0) : val;
+  ad[campo] = (campo === 'monto') ? (parseFloat(val) || 0)
+            : (campo === 'amortizaTodo') ? !!val
+            : val;
   renderComprasCompleto(); recalcular();
   if (typeof renderFlujo === 'function') renderFlujo();
   autosaveSeguimiento();
@@ -12346,6 +12476,9 @@ function panelAdelantos() {
       <td class="center"><select onchange="setAdelanto('${ad.id}','etapa',this.value)" style="border:1px solid #ddd;border-radius:3px;font-size:11px;padding:2px">
         ${['C1','C2','C3','R'].map(e=>`<option value="${e}" ${ad.etapa===e?'selected':''}>${e}</option>`).join('')}</select></td>
       <td class="num"><input type="number" step="any" value="${ad.monto||''}" onchange="setAdelanto('${ad.id}','monto',this.value)" style="width:110px;border:1px solid #ddd;border-radius:3px;font-size:11px;padding:2px 5px;text-align:right"></td>
+      <td class="center"><input type="checkbox" ${ad.amortizaTodo?'checked':''}
+        title="Por defecto este adelanto se descuenta solo con certificaciones de fecha igual o posterior a la suya. Tildá para que pueda descontarse también de certificaciones anteriores."
+        onchange="setAdelanto('${ad.id}','amortizaTodo',this.checked)" style="cursor:pointer"></td>
       <td class="num" style="font-size:11px;color:#666">${fmtN(Math.round(ad._amortizado||0))}</td>
       <td class="num" style="font-size:11px;font-weight:600;color:${(ad._saldo||0)>0.5?'#C05000':'#999'}">${fmtN(Math.round(ad._saldo||0))}</td>
       <td class="center"><button onclick="delAdelanto('${ad.id}')" style="border:none;background:#fee;color:#C00;border-radius:3px;cursor:pointer;padding:2px 7px;font-size:11px">✕</button></td>
@@ -12368,7 +12501,8 @@ function panelAdelantos() {
        <div style="font-size:11px;color:#666;font-weight:600;margin:14px 0 5px">Detalle de adelantos</div>
        <table class="tbl" style="width:100%;margin-bottom:10px"><thead><tr>
          <th>Fecha</th><th>Contratista</th><th>Concepto</th><th class="center">Etapa</th>
-         <th class="num">Monto</th><th class="num">Amortizado</th><th class="num">Saldo</th><th></th>
+         <th class="num">Monto</th><th class="center" title="Descontar también de certificaciones anteriores a este adelanto">🔓 todo</th>
+         <th class="num">Amortizado</th><th class="num">Saldo</th><th></th>
        </tr></thead><tbody>${filasAd}</tbody></table>`
     : '';
 
@@ -12376,10 +12510,21 @@ function panelAdelantos() {
     <div class="card-body">
       <div style="font-size:12px;color:#666;margin-bottom:11px">
         Plata que sale <strong>sin trabajo ejecutado todavía</strong>. No es una certificación.
-        Se descuenta solo de las certificaciones siguientes de ese mismo contratista, empezando por el adelanto más viejo.
-        En el Flujo de Caja se suma únicamente el <strong>saldo sin amortizar</strong>: lo ya descontado
-        viene contado dentro de lo certificado, y contarlo dos veces te inflaría el egreso.
+        Se descuenta únicamente de las certificaciones de ese contratista con <strong>fecha igual o posterior
+        a la del adelanto</strong> — un adelanto es a cuenta de trabajo futuro, no del que ya certificaste y
+        pagaste antes. Si un caso puntual no sigue ese orden, tildá <strong>🔓 todo</strong> en esa fila y ese
+        adelanto va a poder descontarse también de certificaciones anteriores.<br>
+        En el Flujo de Caja se suma el <strong>saldo sin amortizar</strong>: lo ya descontado viene contado
+        dentro de lo certificado, y contarlo dos veces te inflaría el egreso.
       </div>
+      ${(() => {
+        const sf = Object.values(est.porProv).reduce((a,p2)=>a+(p2.sinFecha||0), 0);
+        return sf > 0.5 ? `<div class="alert alert-warn" style="margin-bottom:11px;font-size:12px">
+          ⚠️ Hay <strong>₲ ${fmtN(Math.round(sf))}</strong> certificados <strong>sin fecha</strong> (compras viejas o
+          cargadas sin completar la fecha). Sin fecha no se puede saber si son anteriores o posteriores a un adelanto,
+          así que no descuentan nada. Poneles la fecha desde el ✏️ de cada compra, o usá el tilde 🔓.
+        </div>` : '';
+      })()}
       ${resumen}
       <div style="display:flex;gap:6px;align-items:center;flex-wrap:wrap;padding-top:4px">
         <input id="adl-prov" type="text" list="proveedores-compras-datalist" placeholder="Contratista" style="flex:1;min-width:150px;padding:5px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px">
@@ -12407,8 +12552,9 @@ function renderCertificacion() {
     // FIX jul2026: mismo criterio que Compras materiales — ya no exige Adjudicados.
     // d.mo/d.sub ya vienen filtrados a cant>0 (o subs con costo) desde calcularNecesidades().
     const grupos = [
-      { tipo:'mo', color:'#2E7D32', label:'Mano de obra', lista:Object.entries(d.mo).map(([id,m])=>({base:'mo:'+id, et, nombre:m.nombre, cant:m.cant, unidad:m.unidad, pUnit:precioAdjudicado('mo:'+id)??m.precio, prov:proveedorAdjudicado('mo:'+id)})) },
-      { tipo:'sub', color:'#C05000', label:'Subcontratos', lista:d.sub.map(s=>({base:'sub:'+s.cod, et, nombre:s.desc, cant:s.cant||1, unidad:'gl', pUnit:precioAdjudicado('sub:'+s.cod)??((s.cant||1)>0?s.costo/(s.cant||1):0), prov:proveedorAdjudicado('sub:'+s.cod)})) },
+      // 28/08/2026 — los ítems ✋ salen de acá: tienen su propio panel arriba
+      { tipo:'mo', color:'#2E7D32', label:'Mano de obra', lista:Object.entries(d.mo).filter(([id])=>String(id).indexOf('manual#')!==0).map(([id,m])=>({base:'mo:'+id, et, nombre:m.nombre, cant:m.cant, unidad:m.unidad, pUnit:precioAdjudicado('mo:'+id)??m.precio, prov:proveedorAdjudicado('mo:'+id)})) },
+      { tipo:'sub', color:'#C05000', label:'Subcontratos', lista:d.sub.filter(s=>String(s.cod).indexOf('manual#')!==0).map(s=>({base:'sub:'+s.cod, et, nombre:s.desc, cant:s.cant||1, unidad:'gl', pUnit:precioAdjudicado('sub:'+s.cod)??((s.cant||1)>0?s.costo/(s.cant||1):0), prov:proveedorAdjudicado('sub:'+s.cod)})) },
     ];
     grupos.forEach(g => {
       if (!g.lista.length) return;
@@ -12439,6 +12585,15 @@ function renderCertificacion() {
       html+=`<div class="card"><div class="card-header" style="background:${g.color}">${ET_LABELS[et]} — ${g.label}</div><div class="card-body" style="padding:0;overflow-x:auto">
         <table class="tbl"><thead><tr><th>Ítem</th><th class="center">Cant.</th><th class="num">P. adj.</th><th class="center">Ejecutado</th><th class="center">Restante</th><th class="num">Valor real ₲</th><th class="num">Saldo ₲</th><th class="center">%</th></tr></thead><tbody>${filas}</tbody></table></div></div>`;
     });
+  });
+
+  // Igual que en materiales: los ✋ salen de las tablas por etapa pero siguen
+  // sumando en el total de MO + subcontratos de la obra.
+  (itemsManuales || []).filter(x => x && (x.tipo === 'mo' || x.tipo === 'sub')).forEach(it => {
+    const ekeyIM = it.tipo + ':manual#' + it.id + '@' + (it.etapa || 'C1');
+    totalPpto += (parseFloat(it.cant) || 0) * (parseFloat(it.precio) || 0);
+    totalEjec += gastoRealEjec(ekeyIM, parseFloat(it.precio) || 0);
+    hayItems = true;
   });
 
   const panelManual = panelItemsManuales(['mo','sub'], 'Mano de obra y subcontratos fuera del catálogo');
@@ -13042,9 +13197,8 @@ function costoAdicByEtapa() {
   const out = { C1:0, C2:0, C3:0, R:0 };
   (adicionales||[]).forEach(ad => {
     if (ad.tipo !== 'cliente') return;
-    const row = getBancoRow(ad.cod); if (!row) return;
-    const { mat, mo } = costoUnitVigente(ad.cod, tip);
-    const costo = parseFloat(ad.cant||0) * (mat + mo);
+    const _ai = adicInfo(ad, tip); if (!_ai.ok) return;
+    const costo = parseFloat(ad.cant||0) * (_ai.mat + _ai.mo);
     const et = ad.etapa || 'C3';
     out[et] = (out[et]||0) + costo;
   });
@@ -13355,9 +13509,10 @@ function rubrosOfertaPorEtapa() {
     (res[r.et] = res[r.et] || []).push({ cat:r.cat, desc:r.desc, monto:venta });
   });
   // Adicionales cliente (se cobran aparte, con su margen)
-  (adicionales||[]).filter(a=>a&&a.tipo==='cliente'&&a.cod).forEach(ad=>{
-    const r = getBancoRow(ad.cod); if(!r) return;
-    const { mat, mo } = costoUnitVigente(ad.cod, tip);
+  (adicionales||[]).filter(a=>a&&a.tipo==='cliente'&&(a.cod||a.manual)).forEach(ad=>{
+    const _ai = adicInfo(ad, tip); if(!_ai.ok) return;
+    const r = _ai.manual ? [ _ai.cat, '', _ai.desc ] : getBancoRow(ad.cod);
+    const mat = _ai.mat, mo = _ai.mo;
     const cant = parseFloat(ad.cant)||0;
     const margenAd = (ad.margen!==undefined&&ad.margen!==null&&ad.margen!=='')?parseFloat(ad.margen):50;
     const venta = cant*(mat+mo)*(1+margenAd/100);
@@ -13511,28 +13666,17 @@ function saldoAdelantosProyecto(p) {
   if (!adelantos.length) return 0;
   const ejec = p.ejecucion || {};
 
-  const cert = {};
-  Object.entries(ejec).forEach(([ekey, e]) => {
-    const tipo = ekey.split(':')[0];
-    if (tipo !== 'mo' && tipo !== 'sub') return;
-    (e.lotes || []).forEach(l => {
-      const prov = (l.prov || '').trim();
-      if (!prov) return;
-      cert[prov] = (cert[prov] || 0) + (parseFloat(l.cant)||0) * (parseFloat(l.precio)||0);
-    });
-  });
-
-  const porProv = {};
+  // Misma regla que estadoAdelantos(): amortiza solo con certificaciones de
+  // fecha igual o posterior al adelanto. Si acá se calculara distinto, el
+  // Dashboard global y el Flujo de la misma obra volverían a no coincidir.
+  const certLotes = certificadosConFechaPorProveedor(ejec);
+  let saldo = 0;
   adelantos.slice().sort((a,b)=>(a.fecha||'').localeCompare(b.fecha||'')).forEach(ad => {
     const prov = (ad.prov||'').trim() || '(sin proveedor)';
-    if (!porProv[prov]) porProv[prov] = { disponible: cert[prov] || 0, saldo: 0 };
-    const monto = parseFloat(ad.monto) || 0;
-    const amort = Math.min(monto, Math.max(0, porProv[prov].disponible));
-    porProv[prov].disponible -= amort;
-    porProv[prov].saldo += monto - amort;
+    const amort = _amortizarAdelanto(ad, certLotes[prov] || []);
+    saldo += (parseFloat(ad.monto) || 0) - amort;
   });
-
-  return Object.values(porProv).reduce((a,p2)=>a+p2.saldo, 0);
+  return saldo;
 }
 
 function costoRealEjecutadoProyecto(p) {
@@ -16453,10 +16597,11 @@ function renderOfertaPreview() {
   if (adicCliente.length > 0) {
     html += `<tr><td colspan="5" style="background:#E65100;color:#fff;font-weight:700;font-size:11px;padding:7px 10px;text-transform:uppercase;letter-spacing:0.5px">Adicionales</td></tr>`;
     adicCliente.forEach(ad => {
-      const r = getBancoRow(ad.cod);
-      if (!r) return;
-      const m   = tip === 'superior' ? r[5] : r[4];
-      const mob = tip === 'superior' ? r[7] : r[6];
+      const _ai = adicInfo(ad, tip);
+      if (!_ai.ok) return;
+      const r = _ai.manual ? [ _ai.cat, '', _ai.desc, _ai.unid ] : getBancoRow(ad.cod);
+      const m   = _ai.mat;
+      const mob = _ai.mo;
       const cantA = parseFloat(ad.cant) || 0;
       const margenA = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
       const montoA = Math.round(cantA * (m + mob) * (1 + margenA / 100));
@@ -16847,6 +16992,27 @@ function agregarLineaAdicional() {
   autosaveSeguimiento();   // el cambio queda guardado y sube a la nube
 }
 
+// Adicional que NO sale del Banco: nombre, unidad y precio propios.
+// Se comporta igual que cualquier otro adicional — se cobra con su margen,
+// entra al costo, se puede comprar y certificar, y cae en el Flujo de Caja.
+function agregarLineaAdicionalManual() {
+  adicionales.push({
+    id: 'adic_' + Date.now(),
+    manual: true,
+    nombre: '',
+    unidad: 'gl',
+    precio: 0,
+    cod: '',
+    cant: 1,
+    tipo: 'cliente',
+    etapa: 'C3',
+    margen: 50
+  });
+  renderTablaAdicionales();
+  recalcular();
+  autosaveSeguimiento();
+}
+
 function quitarLineaAdicional(id) {
   adicionales = adicionales.filter(a => a.id !== id);
   renderTablaAdicionales();
@@ -16878,8 +17044,8 @@ function renderTablaAdicionales() {
 
   adicionales.forEach(ad => {
     try {
-      const row = getBancoRow(ad.cod);
-      const { mat, mo } = costoUnitVigente(ad.cod, tip);
+      const _ai = adicInfo(ad, tip);
+      const mat = _ai.mat, mo = _ai.mo;
       const costo = parseFloat(ad.cant || 0) * (mat + mo);
       const margen = (ad.margen !== undefined && ad.margen !== null && ad.margen !== '') ? parseFloat(ad.margen) : 50;
       // Cliente: se cobra costo + margen. Corrección: solo costo (ajusta tu costo interno).
@@ -16891,11 +17057,29 @@ function renderTablaAdicionales() {
         .map(r => `<option value="${r[1]}" ${r[1]===ad.cod?'selected':''}>${r[1]} — ${r[2]}</option>`)
         .join('');
 
-      html += `<tr>
-        <td>
-          <select style="width:260px;padding:5px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px"
-            onchange="actualizarAdicional('${ad.id}','cod',this.value)">${opcionesRubro}</select>
-        </td>
+      // Adicional manual: en vez del desplegable del Banco, sus propios campos.
+      const celdaRubro = ad.manual
+        ? `<td style="min-width:280px">
+             <div style="display:flex;gap:5px;align-items:center;flex-wrap:wrap">
+               <span title="Adicional fuera del Banco de Precios" style="font-size:13px">✋</span>
+               <input type="text" value="${(ad.nombre||'').replace(/"/g,'&quot;')}" placeholder="Nombre del trabajo"
+                 onchange="actualizarAdicional('${ad.id}','nombre',this.value)"
+                 style="flex:1;min-width:150px;padding:5px 8px;border:1px solid #C05000;border-radius:4px;font-size:12px">
+               <input type="text" value="${(ad.unidad||'').replace(/"/g,'&quot;')}" placeholder="unidad"
+                 onchange="actualizarAdicional('${ad.id}','unidad',this.value)"
+                 style="width:66px;padding:5px 6px;border:1px solid #ddd;border-radius:4px;font-size:12px">
+               <input type="number" step="any" value="${ad.precio||''}" placeholder="precio ₲"
+                 onchange="actualizarAdicional('${ad.id}','precio',this.value)"
+                 style="width:110px;padding:5px 6px;border:1.5px solid var(--accent);border-radius:4px;font-size:12px;background:var(--yellow);text-align:right">
+             </div>
+           </td>`
+        : `<td>
+             <select style="width:260px;padding:5px 8px;border:1px solid #ddd;border-radius:4px;font-size:12px"
+               onchange="actualizarAdicional('${ad.id}','cod',this.value)">${opcionesRubro}</select>
+           </td>`;
+
+      html += `<tr${ad.manual?' style="background:#FFF8F2"':''}>
+        ${celdaRubro}
         <td class="num">
           <input type="number" step="0.01" value="${ad.cant}" style="width:90px;padding:5px 8px;border:1.5px solid var(--accent);border-radius:4px;font-size:12px;background:var(--yellow);text-align:right"
             onchange="actualizarAdicional('${ad.id}','cant',this.value)">
@@ -16944,7 +17128,7 @@ function renderTablaAdicionales() {
 function actualizarAdicional(id, campo, valor) {
   const ad = adicionales.find(a => a.id === id);
   if (!ad) return;
-  ad[campo] = (campo === 'cant' || campo === 'margen') ? parseFloat(valor) || 0 : valor;
+  ad[campo] = (campo === 'cant' || campo === 'margen' || campo === 'precio') ? parseFloat(valor) || 0 : valor;
   renderTablaAdicionales();
   recalcular();
 }
