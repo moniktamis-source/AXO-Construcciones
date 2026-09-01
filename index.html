@@ -6593,13 +6593,20 @@ function _capturarFilasParaObra(p, rows) {
   return filas;
 }
 
+// Indice pactado de un proyecto GUARDADO (sep2026): sale de sus propios campos
+// idxGd/idxGi/idxIva/idxUtil, no del formulario abierto. Es exacto, no "el de hoy".
+function _idxDeProyecto(p) {
+  const n = (v, d) => { const x = parseFloat(v); return isFinite(x) ? x : d; };
+  return { gd: n(p && p.idxGd, 5), gi: n(p && p.idxGi, 5), iva: n(p && p.idxIva, 10), util: n(p && p.idxUtil, 30) };
+}
+
 function sellarPresupuestosCongelados() {
   const guardadas = getProyectosGuardados();
   const pendientes = Object.keys(guardadas).filter(nombre => {
     const p = guardadas[nombre];
     if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return false;
     const s = p.snapshotAprobado;
-    return !!s && (!s.preciosInsumos || !s.recetas || !s.filas);
+    return !!s && (!s.preciosInsumos || !s.recetas || !s.filas || !s.idx);
   });
 
   if (!pendientes.length) { alert('✅ Todas las obras aprobadas ya tienen precios y recetas congelados. No hay nada que sellar.'); return; }
@@ -6621,6 +6628,7 @@ function sellarPresupuestosCongelados() {
     if (!p.snapshotAprobado.preciosInsumos) p.snapshotAprobado.preciosInsumos = cap.precios;
     if (!p.snapshotAprobado.recetas)        p.snapshotAprobado.recetas        = cap.recetas;
     if (!p.snapshotAprobado.filas)          p.snapshotAprobado.filas          = _capturarFilasParaObra(p, rowsLimpias);
+    if (!p.snapshotAprobado.idx)            p.snapshotAprobado.idx            = _idxDeProyecto(p);
     p.snapshotAprobado.selladoEl = hoy;
     n++;
   });
@@ -6662,7 +6670,7 @@ function _autoSellarObrasGuardadas() {
     const p = guardadas[n];
     if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return false;
     const snap = p.snapshotAprobado;
-    return !!snap && (!snap.preciosInsumos || !snap.recetas || !snap.filas);
+    return !!snap && (!snap.preciosInsumos || !snap.recetas || !snap.filas || !snap.idx);
   });
   if (!nombres.length) return 0;
 
@@ -6674,6 +6682,7 @@ function _autoSellarObrasGuardadas() {
     if (!p.snapshotAprobado.preciosInsumos) p.snapshotAprobado.preciosInsumos = cap.precios;
     if (!p.snapshotAprobado.recetas)        p.snapshotAprobado.recetas        = cap.recetas;
     if (!p.snapshotAprobado.filas)          p.snapshotAprobado.filas          = _capturarFilasParaObra(p, rowsLimpias);
+    if (!p.snapshotAprobado.idx)            p.snapshotAprobado.idx            = _idxDeProyecto(p);
     p.snapshotAprobado.selladoEl = hoy;
   });
   guardarProyectosGuardados(guardadas);
@@ -7742,10 +7751,15 @@ function calcular() {
 
   const cobroExtraTotal = Object.values(cobroExtraAdicionalesByEtapa).reduce((a,b)=>a+b,0);
 
-  const gd  = pct(document.getElementById('idx-gd')?.value);
-  const gi  = pct(document.getElementById('idx-gi')?.value);
-  const iva = pct(document.getElementById('idx-iva')?.value);
-  const util= pct(document.getElementById('idx-util')?.value);
+  // Indice CONGELADO si la obra esta aprobada (sep2026). Los % del indice
+  // reparten las bolsas del Flujo de Caja: editarlos no debe mover una obra
+  // ya pactada. Si el snapshot no lo tiene (obra vieja), cae al valor vivo,
+  // que es el del propio proyecto guardado.
+  const _idxSnap = (snapshotAprobado && snapshotAprobado.idx) || null;
+  const gd  = _idxSnap ? _idxSnap.gd   : pct(document.getElementById('idx-gd')?.value);
+  const gi  = _idxSnap ? _idxSnap.gi   : pct(document.getElementById('idx-gi')?.value);
+  const iva = _idxSnap ? _idxSnap.iva  : pct(document.getElementById('idx-iva')?.value);
+  const util= _idxSnap ? _idxSnap.util : pct(document.getElementById('idx-util')?.value);
   const idx = (gd + gi + iva + util) / 100;
   const gaExtra = parseFloat(document.getElementById('idx-gaExtra')?.value || 0);
   const desc    = parseFloat(document.getElementById('idx-desc')?.value || 0);
@@ -7770,10 +7784,10 @@ function recalcular() {
   document.getElementById('res-cd').textContent  = fmt(cd);
   document.getElementById('res-pv').textContent  = fmt(pv);
   document.getElementById('res-pf').textContent  = fmt(pf);
-  document.getElementById('res-ant').textContent = fmt(pf * etapasPct.C1 / 100);
+  document.getElementById('res-ant').textContent = fmt(pf * planPagoActivo().C1 / 100);
   // El rótulo decía "Anticipo 35%" fijo aunque la forma de pago fuera otra
   const _antLbl = document.getElementById('res-ant-lbl');
-  if (_antLbl) _antLbl.textContent = 'Anticipo ' + (etapasPct.C1 || 0) + '%';
+  if (_antLbl) _antLbl.textContent = 'Anticipo ' + (planPagoActivo().C1 || 0) + '%';
 
   // Update etapas de pago
   document.getElementById('ep-cd').textContent  = fmt(cd);
@@ -8333,8 +8347,8 @@ function renderOfertaCosteo() {
       <td class="num" style="font-weight:700;font-size:15px;padding:12px">${fmtN(Math.round(pf))}</td>
     </tr>
     <tr style="background:var(--verdel)">
-      <td colspan="4" style="padding:10px;font-weight:600;text-align:right;color:var(--verde)">Anticipo ${etapasPct.C1}% (₲)</td>
-      <td class="num" style="font-weight:600;color:var(--verde);padding:10px">${fmtN(Math.round(pf*etapasPct.C1/100))}</td>
+      <td colspan="4" style="padding:10px;font-weight:600;text-align:right;color:var(--verde)">Anticipo ${planPagoActivo().C1}% (₲)</td>
+      <td class="num" style="font-weight:600;color:var(--verde);padding:10px">${fmtN(Math.round(pf*planPagoActivo().C1/100))}</td>
     </tr>
   </tfoot>`;
   tbl.innerHTML = html;
@@ -8365,7 +8379,7 @@ function renderEtapas(pf, cdByEtapa, cobroExtraAdicionalesByEtapa, cobroExtraTot
 
   keys.forEach(et => {
     const ei = ETAPA_INFO[et];
-    const p  = etapasPct[et];
+    const p  = planPagoActivo()[et];
     const baseSinAdic = pf - (cobroExtraTotal || 0);
     const extraEtapa = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
     const monto = (baseSinAdic * p / 100) + extraEtapa;
@@ -8429,7 +8443,7 @@ function renderOfertaEtapas(pf, cobroExtraAdicionalesByEtapa, cobroExtraTotal) {
 
   keys.forEach((et,i) => {
     const ei = ETAPA_INFO[et];
-    const p  = etapasPct[et];
+    const p  = planPagoActivo()[et];
     const baseSinAdic = pf - (cobroExtraTotal || 0);
     const extraEtapa = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
     const monto = (baseSinAdic * p / 100) + extraEtapa;
@@ -8468,7 +8482,7 @@ function renderLiquidez(pf, cdByEtapa, cobroExtraAdicionalesByEtapa, cobroExtraT
     const ei = ETAPA_INFO[et];
     const baseSinAdic = pf - (cobroExtraTotal || 0);
     const extraEtapa = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
-    const cobro  = (baseSinAdic * etapasPct[et] / 100) + extraEtapa;
+    const cobro  = (baseSinAdic * planPagoActivo()[et] / 100) + extraEtapa;
     const costo  = cdByEtapa[et] || 0;
     const margen = cobro - costo;
     const mPct   = cobro > 0 ? margen/cobro*100 : 0;
@@ -8502,7 +8516,7 @@ function renderAlertasGlobal(pf, cdByEtapa, cobroExtraAdicionalesByEtapa, cobroE
     const ei = ETAPA_INFO[et];
     const baseSinAdic = pf - (cobroExtraTotal || 0);
     const extraEtapa = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
-    const cobro  = (baseSinAdic * etapasPct[et] / 100) + extraEtapa;
+    const cobro  = (baseSinAdic * planPagoActivo()[et] / 100) + extraEtapa;
     const costo  = cdByEtapa[et] || 0;
     const margen = cobro - costo;
     const mPct   = cobro > 0 ? margen/cobro*100 : 0;
@@ -13213,7 +13227,7 @@ function renderFlujo() {
   const eg = egresosPorEtapa();                       // egresos reales a proveedores por etapa
   const ET = ['C1','C2','C3','R'];
   const ET_LBL = { C1:'C1 — Anticipo', C2:'C2 — Avance', C3:'C3 — Avance', R:'Retención' };
-  const plan = etapasPct;                             // % de la forma de pago que vos insertás (en vivo, = Liquidez/Oferta)
+  const plan = planPagoActivo();                      // forma de pago CONGELADA si la obra esta aprobada (= Liquidez/Oferta)
 
   const baseSinAdic = pf - (cobroExtraTotal || 0);    // precio base sin adicionales (= total a cobrar base)
 
@@ -13224,29 +13238,23 @@ function renderFlujo() {
   const cargado = { Obra:0, GD:0, GI:0, IVA:0, Utilidad:0 };   // lo que entra a cada bolsa desde el cobro real
   const porEtapa = {};                                          // et -> {buckets..., previsto, cobrado, costoEtapa, margenEtapa}
 
-  // ── REPARTO POR BOLSA (FIX ago2026) ─────────────────────────────────────
-  // Antes la bolsa Obra se cargaba con el COSTO PRESUPUESTADO de la etapa y la
-  // Utilidad se quedaba con el residuo (previsto − costo − GD − GI − IVA).
-  // Con un plan de pago 35/35/25/5 y un costo que no sigue ese mismo ritmo, el
-  // desfasaje de calendario caía entero sobre la Utilidad y la hundía a números
-  // negativos aunque la obra fuera rentable. El número no significaba nada.
+  // ── REPARTO POR BOLSA (REVISIÓN sep2026) ────────────────────────
+  // El reparto plano por índice (ago2026) rompía la certeza por etapa: partía
+  // cada guaraní cobrado con los MISMOS porcentajes en todas las etapas, sin
+  // mirar cuánto cuesta cada una. Como la forma de pago no sigue el ritmo del
+  // costo, a una etapa le sobraba plata en la bolsa Obra y a la siguiente le
+  // faltaba, y la Utilidad mostraba plata que en realidad era de la obra.
   //
-  // Ahora hace lo que el cartel de la tabla siempre prometió: cada guaraní
-  // COBRADO se parte en las 5 bolsas según el índice de venta. Con índice 50
-  // (GD5 + GI5 + IVA10 + Util30) sobre un costo base 100, el factor es 1,5:
-  //   Obra 66,67% · GD 3,33% · GI 3,33% · IVA 6,67% · Utilidad 20% = 100%
-  // Cada bolsa se llena con su parte y se vacía con sus gastos. Si una queda en
-  // rojo, es porque se gastó de esa bolsa más de lo que la obra le aportó — que
-  // es justamente lo que hay que ver.
-  const factorIdx = 1 + (gd + gi + iva + util) / 100;
-  const SHARE = {
-    Obra:      1              / factorIdx,
-    GD:       (gd   / 100)    / factorIdx,
-    GI:       (gi   / 100)    / factorIdx,
-    IVA:      (iva  / 100)    / factorIdx,
-    Utilidad: (util / 100)    / factorIdx,
-  };
-
+  // Vuelve la regla original —cada etapa reparte SU cobro contra SU costo
+  // congelado— pero alimentada por el COBRADO real y en CASCADA:
+  //
+  //     Costo Obra → GD → GI → IVA → Utilidad
+  //
+  // La bolsa Obra de la etapa se llena primero, hasta cubrir el costo de esa
+  // etapa. Recién cuando está cubierta se cargan GD/GI/IVA (% sobre ese mismo
+  // costo, según el índice) y la Utilidad se queda con el residuo. Así cada
+  // etapa cierra sola, la obra nunca queda sin financiar, y un descuento se
+  // come la utilidad en vez de la plata de la obra.
   ET.forEach(et => {
     const pp = plan[et] || 0;
     const cobroExtra = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
@@ -13256,13 +13264,36 @@ function renderFlujo() {
     const costoEtapa  = cdByEtapa[et] || 0;                    // costo presupuestado (= Costo de Liquidez)
     const margenEtapa = previsto - costoEtapa;                 // = Margen de Liquidez
 
-    porEtapa[et] = { previsto, cobrado, costoEtapa, margenEtapa };
+    // Lo que esta etapa le debe a cada bolsa si se cobrara entera.
+    const need = {
+      Obra: costoEtapa,
+      GD:   costoEtapa * gd  / 100,
+      GI:   costoEtapa * gi  / 100,
+      IVA:  costoEtapa * iva / 100,
+    };
+    need.Utilidad = Math.max(0, previsto - need.Obra - need.GD - need.GI - need.IVA);
+
+    porEtapa[et] = { previsto, cobrado, costoEtapa, margenEtapa, need };
+
+    // Cascada con lo efectivamente cobrado, en el orden de BOLSAS.
+    let rem = cobrado;
     BOLSAS.forEach(b => {
-      const parte = cobrado * SHARE[b];
+      const parte = Math.max(0, Math.min(rem, need[b]));
+      rem -= parte;
       porEtapa[et][b] = parte;
       cargado[b] += parte;
     });
+    // Sobre-cobro respecto del previsto: el excedente es utilidad.
+    if (rem > 0.5) { porEtapa[et].Utilidad += rem; cargado.Utilidad += rem; }
   });
+
+  // % de cada bolsa sobre el TOTAL del contrato (solo para el encabezado).
+  const _needTot = { Obra:0, GD:0, GI:0, IVA:0, Utilidad:0 };
+  let _prevTot = 0;
+  ET.forEach(et => { _prevTot += porEtapa[et].previsto; BOLSAS.forEach(b => { _needTot[b] += porEtapa[et].need[b]; }); });
+  const SHARE = {};
+  BOLSAS.forEach(b => { SHARE[b] = _prevTot > 0 ? _needTot[b] / _prevTot : 0; });
+
 
   // ── Movimientos manuales agregados por bolsa (CD/CO viejos => Obra) ──
   const normRec = r => (r === 'CD' || r === 'CO') ? 'Obra' : r;
@@ -13422,7 +13453,7 @@ function renderFlujo() {
     <tr style="background:#E8F0E5;font-weight:700"><td></td><td style="font-size:11px;color:#C05000">Salida</td>${BOLSAS.map(b=>{const t=ET.reduce((a,e)=>a+salidaEt[e][b],0);return `<td class="num" style="color:#C05000">${t?fmtN(Math.round(t)):'—'}</td>`;}).join('')}</tr>
     <tr style="background:#DCEBD6;font-weight:700;border-bottom:2px solid #4A6741"><td></td><td style="font-size:11px">Saldo</td>${BOLSAS.map(b=>{const t=cargado[b]-ET.reduce((a,e)=>a+salidaEt[e][b],0);return `<td class="num" style="color:${t>=0?'#2E7D32':'#C00000'}">${fmtN(Math.round(t))}</td>`;}).join('')}</tr>
     </tbody></table>
-    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Cada guaraní <strong>cobrado</strong> se parte en las 5 bolsas según el índice de venta (${(gd+gi+iva+util).toFixed(0)}% sobre costo → factor ${factorIdx.toFixed(2)}). Los porcentajes suman 100%: nada se pierde ni se inventa. Una etapa sin cobrar no reparte nada.<br><strong>Salida</strong> de Costo Obra sale sola de Compras, según la etapa de cada compra. Las demás salen de los movimientos manuales, imputadas a la etapa que les cargaste ahí.</div>
+    <div style="padding:8px 14px;background:#FFF8F0;font-size:11px;color:#666;border-top:1px solid #eee">Cada etapa reparte lo que <strong>cobraste</strong> en <strong>cascada</strong>: primero llena su <strong>Costo Obra</strong> hasta cubrir el costo congelado de esa etapa, después GD, GI e IVA (${gd}/${gi}/${iva}% sobre ese costo) y la <strong>Utilidad</strong> se queda con lo que sobra. Así cada etapa cierra sola y la obra nunca queda sin financiar. Los % del encabezado son sobre el total del contrato. Una etapa sin cobrar no reparte nada.<br><strong>Salida</strong> de Costo Obra sale sola de Compras, según la etapa de cada compra. Las demás salen de los movimientos manuales, imputadas a la etapa que les cargaste ahí.</div>
   </div></div>
 
   <div class="card"><div class="card-header" style="background:#4A6741">👛 Bolsas — saldo disponible</div>
@@ -13543,14 +13574,14 @@ function renderCertCliente() {
   ['C1','C2','C3','R'].forEach(et => {
     const rubros = data[et]||[];
     if (!rubros.length) return;
-    const aCobrar = pf * (etapasPct[et]||0) / 100;  // monto de la oferta para esta etapa
+    const aCobrar = pf * (planPagoActivo()[et]||0) / 100;  // monto de la oferta para esta etapa
     let filas='';
     rubros.forEach(r=>{ filas+=`<tr><td style="padding:4px 10px;font-size:12px">${r.desc}</td></tr>`; });
     html+=`<div class="card"><div class="card-header" style="background:${ET_COL[et]}">${ET_LBL[et]}
       <button class="btn btn-sm" style="background:rgba(255,255,255,0.2);color:#fff" onclick="pdfCertCliente('${et}')">📄 PDF etapa ${et}</button></div>
       <div class="card-body" style="padding:0;overflow-x:auto">
       <table class="tbl"><thead><tr><th>Trabajos de la etapa (${rubros.length})</th></tr></thead><tbody>${filas}</tbody></table>
-      <div style="padding:10px 14px;background:#E8F0E5;display:flex;align-items:center;gap:12px"><span style="font-weight:600">A cobrar (${etapasPct[et]||0}% del contrato):</span><strong style="color:${ET_COL[et]};font-size:15px">₲ ${fmtN(Math.round(aCobrar))}</strong></div>
+      <div style="padding:10px 14px;background:#E8F0E5;display:flex;align-items:center;gap:12px"><span style="font-weight:600">A cobrar (${planPagoActivo()[et]||0}% del contrato):</span><strong style="color:${ET_COL[et]};font-size:15px">₲ ${fmtN(Math.round(aCobrar))}</strong></div>
       </div></div>`;
   });
   if (!html) html=`<div class="card"><div class="card-body"><div class="alert alert-warn">No hay rubros cargados.</div></div></div>`;
@@ -13562,7 +13593,7 @@ function pdfCertCliente(et) {
   const { pf } = calcular();
   const ET_LBL = { C1:'Etapa 1 — Anticipo', C2:'Etapa 2', C3:'Etapa 3', R:'Retención / Entrega final' };
   const rubros = data[et]||[];
-  const aCobrar = pf * (etapasPct[et]||0) / 100;
+  const aCobrar = pf * (planPagoActivo()[et]||0) / 100;
   const cli = document.getElementById('p-cliente')?.value || '';
   const proy = document.getElementById('p-proyecto')?.value || '';
   const hoy = new Date().toLocaleDateString('es-PY');
@@ -13571,7 +13602,7 @@ function pdfCertCliente(et) {
   let c = `<h1>AXO Construcciones</h1><div class="meta">Certificación de obra — ${ET_LBL[et]} · ${cli} ${proy?'— '+proy:''} · ${hoy}</div>
     <p style="font-size:12px;margin-bottom:10px">Se certifican los siguientes trabajos correspondientes a la <strong>${ET_LBL[et]}</strong>, conforme a la oferta aprobada:</p>
     <table><thead><tr><th>Trabajos de la etapa</th></tr></thead><tbody>${filas}</tbody></table>
-    <table style="margin-top:10px"><tbody><tr style="background:#E8F0E5;font-weight:700"><td>MONTO A COBRAR (${etapasPct[et]||0}% del contrato)</td><td class="num">₲ ${fmtN(Math.round(aCobrar))}</td></tr></tbody></table>
+    <table style="margin-top:10px"><tbody><tr style="background:#E8F0E5;font-weight:700"><td>MONTO A COBRAR (${planPagoActivo()[et]||0}% del contrato)</td><td class="num">₲ ${fmtN(Math.round(aCobrar))}</td></tr></tbody></table>
     <p style="margin-top:24px;font-size:11px;color:#666">Firma cliente: __________________________  ·  Firma AXO Construcciones: __________________________</p>`;
   abrirPDF('Certificación cliente '+et, c);
 }
@@ -13609,8 +13640,20 @@ function renderDashProyecto() {
   if (finPlan>0) avanceTxt = (finReal>finPlan?'+':'')+(finReal-finPlan)+' días vs plan';
 
   const rentabilidad = cd > 0 ? Math.round((margenPrev / cd) * 100) : 0;
-  const margenReal = egresos > 0 ? (pf - egresos) : null; // solo tiene sentido si ya hay gasto real registrado
-  const rentabilidadReal = (margenReal !== null && egresos > 0) ? Math.round((margenReal / egresos) * 100) : null;
+
+  // ── MARGEN REAL: solo con la obra TERMINADA (sep2026) ───────────────────
+  // Antes era pf - egresos siempre: comparaba el contrato ENTERO contra el
+  // gasto hecho HASTA HOY. A mitad de obra daba numeros disparatados (Diego:
+  // margen 135M y rentabilidad 687% con el 18% del costo pagado). Solo
+  // significa algo cuando ya se gasto todo lo que se iba a gastar.
+  const obraTerminada = (estadoProyecto === 'finalizado');
+  const margenReal = (obraTerminada && egresos > 0) ? (pf - egresos) : null;
+  const rentabilidadReal = (margenReal !== null) ? Math.round((margenReal / egresos) * 100) : null;
+
+  // En obra EN CURSO, lo que si sirve para decidir hoy.
+  const costoPendiente = Math.max(0, cd - egresos);          // costo de obra que falta pagar
+  const pctEjecutado   = cd > 0 ? Math.round(egresos / cd * 100) : 0;
+  const cajaLibre      = cobrado - egresos - costoPendiente; // caja NO comprometida con la obra
   let tarjetas = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
   tarjetas += tarjeta('Estado', estadoLbl, '#4A6741');
   tarjetas += tarjeta('Precio de venta', '₲ '+fmtN(Math.round(pf)), '#1565C0');
@@ -13618,8 +13661,17 @@ function renderDashProyecto() {
   tarjetas += tarjeta('Margen previsto', '₲ '+fmtN(Math.round(margenPrev)), '#2E7D32');
   tarjetas += tarjeta('Rentabilidad prevista', rentabilidad+'%', rentabilidad>=15?'#2E7D32':'#E65100');
   tarjetas += `</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
-  tarjetas += tarjeta('Margen real', margenReal!==null?'₲ '+fmtN(Math.round(margenReal)):'—', margenReal!==null?(margenReal>=margenPrev?'#2E7D32':'#E65100'):'#999');
-  tarjetas += tarjeta('Rentabilidad real', rentabilidadReal!==null?rentabilidadReal+'%':'—', rentabilidadReal!==null?(rentabilidadReal>=15?'#2E7D32':'#E65100'):'#999');
+  if (obraTerminada) {
+    tarjetas += tarjeta('Margen real', margenReal!==null?'₲ '+fmtN(Math.round(margenReal)):'—', margenReal!==null?(margenReal>=margenPrev?'#2E7D32':'#E65100'):'#999');
+    tarjetas += tarjeta('Rentabilidad real', rentabilidadReal!==null?rentabilidadReal+'%':'—', rentabilidadReal!==null?(rentabilidadReal>=15?'#2E7D32':'#E65100'):'#999');
+  } else {
+    tarjetas += tarjeta('Costo ejecutado', '₲ '+fmtN(Math.round(egresos))+' <span style="font-size:12px;font-weight:600;opacity:0.65">('+pctEjecutado+'% del presupuestado)</span>', '#C05000');
+    tarjetas += tarjeta('Compromiso pendiente', '₲ '+fmtN(Math.round(costoPendiente)), '#E65100');
+    tarjetas += tarjeta('Caja libre', '₲ '+fmtN(Math.round(cajaLibre)), cajaLibre>=0?'#2E7D32':'#C00000');
+    tarjetas += `<div style="width:100%;font-size:11.5px;color:#666;background:#F4F7F3;border-left:3px solid #4A6741;border-radius:0 6px 6px 0;padding:8px 11px;margin-top:2px">
+      <strong>Margen real</strong> y <strong>Rentabilidad real</strong> aparecen recién con la obra <strong>Finalizada</strong>: hasta entonces compararían el contrato entero contra un gasto que todavía no terminó, y el número sale inflado.<br>
+      <strong>Compromiso pendiente</strong> = costo de obra presupuestado que todavía no pagaste. <strong>Caja libre</strong> = lo cobrado menos todo el costo de obra (pagado y por pagar); de ahí salen todavía Gastos Indirectos, IVA y tu utilidad.</div>`;
+  }
   tarjetas += `</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
   tarjetas += tarjeta('Cobrado', '₲ '+fmtN(Math.round(cobrado)), '#2E7D32');
   tarjetas += tarjeta('Egresos obra (real)', '₲ '+fmtN(Math.round(egresos)), '#C05000');
@@ -13640,7 +13692,7 @@ function renderDashProyecto() {
   // tabla por etapa
   let filas='';
   ET.forEach(et=>{
-    const prev = pf*(etapasPct[et]||0)/100;
+    const prev = pf*(planPagoActivo()[et]||0)/100;
     const cob = cobrosReales[et]||0;
     const egr = eg[et]||0;
     filas+=`<tr><td style="padding:6px 10px;font-weight:600">${et}</td><td class="num">${fmtN(Math.round(prev))}</td><td class="num" style="color:#2E7D32">${fmtN(Math.round(cob))}</td><td class="num" style="color:#C05000">${fmtN(Math.round(egr))}</td><td class="num" style="color:${(cob-egr)>=0?'#2E7D32':'#C00000'};font-weight:700">${fmtN(Math.round(cob-egr))}</td></tr>`;
@@ -13728,6 +13780,9 @@ function renderDashGlobal() {
 
   let cont = { total:nombres.length, no_aprobado:0, aprobado:0, finalizado:0 };
   let gPv=0, gCobrado=0, gEgresos=0, gCd=0, gCostoReal=0, filas='';
+  // Acumuladores separados (sep2026): el margen real solo cuenta obras
+  // FINALIZADAS; las que estan en curso van al compromiso pendiente.
+  let nFin=0, gPvFin=0, gCostoRealFin=0, gCdCurso=0, gCostoRealCurso=0;
 
   nombres.forEach(n=>{
     const p = guardados[n] || {};
@@ -13742,8 +13797,11 @@ function renderDashGlobal() {
     const margen = (pv && cd) ? pv - cd : 0;
     const rent = cd > 0 ? Math.round((margen / cd) * 100) : null;
     const costoReal = costoRealEjecutadoProyecto(p);
-    const margenReal = (pv && costoReal > 0) ? pv - costoReal : null;
-    const rentReal = costoReal > 0 ? Math.round((margenReal / costoReal) * 100) : null;
+    // Margen real solo con la obra TERMINADA: en obra en curso compararia la
+    // venta entera contra un gasto a medio hacer y daria un numero inflado.
+    const terminada = (est === 'finalizado');
+    const margenReal = (terminada && pv && costoReal > 0) ? pv - costoReal : null;
+    const rentReal = (margenReal !== null) ? Math.round((margenReal / costoReal) * 100) : null;
     const cobros = p.cobrosReales || {};
     const cobrado = Object.values(cobros).reduce((a,b)=>a+(parseFloat(b)||0),0);
     // Los totales de plata cuentan SOLO lo que es obra de verdad. Un presupuesto
@@ -13751,6 +13809,8 @@ function renderDashGlobal() {
     // número que no sirve para decidir nada.
     const esObra = (est === 'aprobado' || est === 'finalizado');
     if (esObra) { gPv += pv; gCobrado += cobrado; gCd += cd; gCostoReal += costoReal; }
+    if (terminada) { nFin++; gPvFin += pv; gCostoRealFin += costoReal; }
+    else if (est === 'aprobado') { gCdCurso += cd; gCostoRealCurso += costoReal; }
     const estLbl = { no_aprobado:'🟡', aprobado:'🟢', finalizado:'⚫' }[est]||'🟡';
     const porCobrar = pv - cobrado;
     const rentTxt = rent!==null ? `<span style="color:${rent>=15?'#2E7D32':'#E65100'};font-weight:600">${rent}%</span>` : '—';
@@ -13761,8 +13821,9 @@ function renderDashGlobal() {
   const nObras = (cont.aprobado||0) + (cont.finalizado||0);
   const gMargen = gPv - gCd;
   const gRent = gCd > 0 ? Math.round((gMargen / gCd) * 100) : null;
-  const gMargenReal = gCostoReal > 0 ? gPv - gCostoReal : null;
-  const gRentReal = gCostoReal > 0 ? Math.round((gMargenReal / gCostoReal) * 100) : null;
+  const gMargenReal = (nFin > 0 && gCostoRealFin > 0) ? gPvFin - gCostoRealFin : null;
+  const gRentReal = (gMargenReal !== null) ? Math.round((gMargenReal / gCostoRealFin) * 100) : null;
+  const gPendienteCurso = Math.max(0, gCdCurso - gCostoRealCurso);
 
   let tarjetas = `<div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
   tarjetas += tarjeta('Proyectos', cont.total, '#4A6741');
@@ -13774,15 +13835,18 @@ function renderDashGlobal() {
   tarjetas += tarjeta('Margen previsto', '₲ '+fmtN(Math.round(gMargen)), '#2E7D32');
   tarjetas += tarjeta('Rentabilidad prevista', gRent!==null?gRent+'%':'—', (gRent!==null&&gRent>=15)?'#2E7D32':'#E65100');
   tarjetas += `</div><div style="display:flex;gap:12px;flex-wrap:wrap;margin-bottom:14px">`;
-  tarjetas += tarjeta('Margen obras (real)', gMargenReal!==null?'₲ '+fmtN(Math.round(gMargenReal)):'—', gMargenReal!==null?(gMargenReal>=gMargen?'#2E7D32':'#E65100'):'#999');
-  tarjetas += tarjeta('Rentabilidad real', gRentReal!==null?gRentReal+'%':'—', gRentReal!==null?(gRentReal>=15?'#2E7D32':'#E65100'):'#999');
+  tarjetas += tarjeta('Margen real (finalizadas)', gMargenReal!==null?'₲ '+fmtN(Math.round(gMargenReal)):'—', gMargenReal!==null?'#2E7D32':'#999');
+  tarjetas += tarjeta('Rentabilidad real (finalizadas)', gRentReal!==null?gRentReal+'%':'—', gRentReal!==null?(gRentReal>=15?'#2E7D32':'#E65100'):'#999');
+  tarjetas += tarjeta('Compromiso pendiente (en curso)', '₲ '+fmtN(Math.round(gPendienteCurso)), gPendienteCurso>0?'#E65100':'#999');
   tarjetas += tarjeta('Cobrado total', '₲ '+fmtN(Math.round(gCobrado)), '#2E7D32');
   tarjetas += tarjeta('Por cobrar', '₲ '+fmtN(Math.round(gPv-gCobrado)), '#C05000');
   tarjetas += `</div>
   <div style="font-size:11.5px;color:#666;background:#F4F7F3;border-left:3px solid #4A6741;border-radius:0 6px 6px 0;padding:8px 11px;margin-bottom:14px">
     Los montos suman <strong>${nObras} obra(s) aprobadas o finalizadas</strong>.
     Los ${cont.no_aprobado||0} presupuesto(s) sin aprobar aparecen en la tabla de abajo pero <strong>no suman</strong>:
-    todavía son ofertas, no obra.
+    todavía son ofertas, no obra.<br>
+    <strong>Margen y rentabilidad reales</strong> cuentan solo las <strong>${nFin} obra(s) finalizada(s)</strong>: en una obra en curso se compararía la venta entera contra un gasto a medio hacer y el número sale inflado. Por eso la columna «Rentab. real» muestra «—» mientras la obra no esté terminada.
+    <strong>Compromiso pendiente</strong> es el costo de obra que las obras en curso todavía tienen que pagar.
   </div>`;
 
   // ── Resumen Gabinete (solo lo cobrado) ──
@@ -16477,7 +16541,7 @@ function renderCronoResumenEtapas(totalSemanas, totPorSemana, vista, pf, cd) {
 
   ['C1','C2','C3','R'].forEach(et => {
     const ei = ETAPA_INFO[et];
-    const p = etapasPct[et];
+    const p = planPagoActivo()[et];
     const cobro = pf * p / 100;
     const costo = cdByEtapa[et] || 0;
     const margen = cobro - costo;
@@ -16648,7 +16712,7 @@ function renderOfertaPreview() {
   const baseSinAdic = pf - (cobroExtraTotal || 0);   // presupuesto sin adicionales
   etapasKeys.forEach((et, i) => {
     const ei = ETAPA_INFO[et];
-    const p = etapasPct[et];
+    const p = planPagoActivo()[et];
     const extraEtapa = (cobroExtraAdicionalesByEtapa && cobroExtraAdicionalesByEtapa[et]) || 0;
     const monto = (baseSinAdic * p / 100) + extraEtapa;   // % del base + adicional íntegro de esta etapa
     html += `<tr class="et-row" style="background:${ei.light};border-bottom:1px solid #ddd">
@@ -16670,7 +16734,7 @@ function renderOfertaPreview() {
     </tfoot>
   </table>
   <div style="margin-top:10px;font-size:11px;color:#888;font-style:italic">
-    Retención del ${etapasPct.R}% liberada a los 5 días hábiles de la firma del Acta de Entrega Definitiva. Garantía de obra: 24 meses.
+    Retención del ${planPagoActivo().R}% liberada a los 5 días hábiles de la firma del Acta de Entrega Definitiva. Garantía de obra: 24 meses.
   </div>
   </div>
 
@@ -16891,6 +16955,12 @@ function cambiarEstadoProyecto(nuevoEstado) {
       planPago: JSON.parse(JSON.stringify(etapasPct)),
       desc:    parseFloat(document.getElementById('idx-desc')?.value || 0),
       gaExtra: parseFloat(document.getElementById('idx-gaExtra')?.value || 0),
+      // Indice congelado (sep2026): GD/GI/IVA/Utilidad pactados de esta obra.
+      // Reparten las bolsas del Flujo; no deben moverse despues de aprobar.
+      idx: { gd:  pct(document.getElementById('idx-gd')?.value),
+             gi:  pct(document.getElementById('idx-gi')?.value),
+             iva: pct(document.getElementById('idx-iva')?.value),
+             util:pct(document.getElementById('idx-util')?.value) },
     };
     estadoProyecto = 'aprobado';
   } else if (nuevoEstado === 'no_aprobado' && (estadoProyecto === 'aprobado' || estadoProyecto === 'finalizado')) {
@@ -16965,6 +17035,19 @@ function renderEstadoProyecto() {
   renderAlertasPrecio();
   renderVencimientos();
   
+  // Indice congelado en obra aprobada (sep2026): se muestra el pactado y no se edita.
+  const _idxLock = (estadoProyecto === 'aprobado' || estadoProyecto === 'finalizado');
+  const _idxMap = { 'idx-gd':'gd', 'idx-gi':'gi', 'idx-iva':'iva', 'idx-util':'util' };
+  Object.keys(_idxMap).forEach(id => {
+    const el = document.getElementById(id);
+    if (!el) return;
+    if (_idxLock && snapshotAprobado && snapshotAprobado.idx) el.value = snapshotAprobado.idx[_idxMap[id]];
+    el.disabled = _idxLock;
+    el.style.opacity = _idxLock ? '0.6' : '';
+    el.style.cursor  = _idxLock ? 'not-allowed' : '';
+    el.title = _idxLock ? 'Congelado — presupuesto aprobado' : '';
+  });
+
   // Actualizar también el badge de la barra grande de proyecto activo
   actualizarBarraEstado();
 }
@@ -19309,7 +19392,7 @@ function generarContrato() {
   const fecha = new Date().toLocaleDateString('es-PY');
 
   // Etapas de pago desde la oferta
-  const e = etapasPct;
+  const e = planPagoActivo();
   const m1 = pf * e.C1 / 100, m2 = pf * e.C2 / 100, m3 = pf * e.C3 / 100, mr = pf * e.R / 100;
 
   // Lista de características desde los rubros cargados
@@ -19450,7 +19533,7 @@ function generarGarantia() {
 function generarConstancia() {
   const c = calcular();
   const pf = c.pf || 0;
-  const retencion = pf * (etapasPct.R || 5) / 100;
+  const retencion = pf * (planPagoActivo().R || 5) / 100;
   const cliente = document.getElementById('p-cliente').value || '____________';
   const ubicacion = document.getElementById('p-ubicacion').value || '____________';
   const fecha = new Date().toLocaleDateString('es-PY');
@@ -19470,7 +19553,7 @@ function generarConstancia() {
 
     <p style="background:#f7f7f4;padding:12px;border-radius:6px;font-size:14px">
       <strong>Monto pendiente:</strong> ₲ ${fmtN(retencion)}<br>
-      <strong>Concepto:</strong> Saldo por retención (${etapasPct.R || 5}%), liberable a los 5 días hábiles del Acta de Entrega Final.<br>
+      <strong>Concepto:</strong> Saldo por retención (${planPagoActivo().R || 5}%), liberable a los 5 días hábiles del Acta de Entrega Final.<br>
       <strong>Fecha de pago acordada:</strong> ____________<br>
       <strong>Forma de pago:</strong> Transferencia bancaria
     </p>
