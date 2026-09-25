@@ -120,8 +120,8 @@ src="https://www.facebook.com/tr?id=3441819799314909&ev=PageView&noscript=1"
     <span class="marca-texto">AXO CONSTRUCCIONES</span>
   </div>
 
-  <h1>Contanos tu proyecto y te ayudamos a construirlo.</h1>
-  <p class="subt">Planos, construcción, refacción o un proyecto comercial — dejanos tus datos y te escribimos para conversarlo.</p>
+  <h1 id="titulo-principal">Contanos tu proyecto y te ayudamos a construirlo.</h1>
+  <p class="subt" id="subt-principal">Planos, construcción, refacción o un proyecto comercial — dejanos tus datos y te escribimos para conversarlo.</p>
 
   <div class="franja">
     <span class="franja-item">Garantía de 24 meses</span>
@@ -160,6 +160,8 @@ src="https://www.facebook.com/tr?id=3441819799314909&ev=PageView&noscript=1"
             <option value="Proyecto residencial">Proyecto residencial</option>
             <option value="Proyecto Comercial">Proyecto Comercial</option>
             <option value="Carpeta AFD">Carpeta AFD</option>
+            <option value="Quincho + Piscina">Quincho + Piscina</option>
+            <option value="Casa Quinta">Casa Quinta</option>
           </select>
         </div>
         <div class="campo">
@@ -187,6 +189,29 @@ src="https://www.facebook.com/tr?id=3441819799314909&ev=PageView&noscript=1"
   const SUPABASE_URL = 'https://uhvfnvqjzrwyriwbqvfu.supabase.co';
   const SUPABASE_KEY = 'sb_publishable_P71pLzSZflQSHddzvt-90w_uhynN4g6';
   const supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
+
+  // Producto que viene del anuncio de Meta (?producto=...): se preselecciona
+  // en "¿Qué necesitás?" y se adapta el título. Sin parámetro, la página queda igual.
+  const PRODUCTOS = {
+    'quincho-piscina': {
+      interes: 'Quincho + Piscina',
+      titulo: 'Tu quincho y tu piscina, listos para disfrutar.',
+      subt: 'Dejanos tus datos y te enviamos por WhatsApp las 3 opciones de Quincho + Piscina, con todo lo que incluye cada una.'
+    },
+    'casa-quinta': {
+      interes: 'Casa Quinta',
+      titulo: 'Convertí tu terreno en tu casa quinta.',
+      subt: 'Dejanos tus datos y te enviamos por WhatsApp las 3 opciones de Casa Quinta: muralla, quincho y piscina, llave en mano.'
+    }
+  };
+  (function aplicarProducto(){
+    const clave = (new URLSearchParams(window.location.search).get('producto') || '').toLowerCase();
+    const p = PRODUCTOS[clave];
+    if (!p) return;
+    document.getElementById('f-interes').value = p.interes;
+    document.getElementById('titulo-principal').textContent = p.titulo;
+    document.getElementById('subt-principal').textContent = p.subt;
+  })();
 
   const form = document.getElementById('form-lead');
   const btn = document.getElementById('btn-enviar');
