@@ -2529,8 +2529,35 @@ const PLANTILLAS_DEFAULT = {
   'Proyecto residencial':    'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu interés en construir tu casa propia 🏠 Contame sobre tu terreno y cómo imaginás tu hogar, y armamos juntos una propuesta a medida.',
   'Proyecto Comercial':      'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre tu proyecto comercial 🏢 Contame el rubro y el espacio que necesitás, y vemos la mejor forma de concretarlo.',
   'Carpeta AFD':             'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre la carpeta AFD 📁 Te acompañamos con toda la documentación para que el trámite sea ágil. Contame los datos del inmueble y arrancamos.',
+  'Quincho + Piscina':       '¡Hola {nombre}! 👋 Soy Monica, de AXO Construcciones 🏡\n\n¡Gracias por tu interés en nuestro Quincho + Piscina! 💦🔥 Te comparto las 3 opciones que tenemos, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu espacio 📐 ¿Te queda mejor esta semana o la próxima? 📅',
+  'Casa Quinta':             '¡Hola {nombre}! 👋 Soy Monica, de AXO Construcciones 🌴\n\n¡Gracias por tu interés en nuestra Casa Quinta! 🏡 Te comparto las 3 opciones: muralla con iluminación y portón, quincho con parrilla y piscina con cascada, todo llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu terreno 📐 ¿Te queda mejor esta semana o la próxima? 📅',
   'Consulta general':        'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta y quiero ayudarte 🙂 Contame un poco más sobre lo que necesitás y vemos juntos cómo darle forma a tu proyecto.'
 };
+
+// Categorías de interés del CRM, en el orden en que se muestran. Son los mismos
+// valores que manda captacion.html en el campo "interes" de axo_leads_web.
+// (26/09/2026: se suman Quincho + Piscina y Casa Quinta)
+const INTERESES_CRM = ['Planos municipales','Construcción/Refacción','Proyecto residencial','Proyecto Comercial','Carpeta AFD','Quincho + Piscina','Casa Quinta','Consulta general'];
+
+// Opciones del selector de interés: la lista oficial y, si el lead trae un
+// interés que no está en ella (ej. 'Construcción' o 'Refacción' de leads viejos),
+// se agrega al final para mostrarlo tal cual vino. Antes el selector se armaba
+// con las plantillas guardadas y, si el interés no estaba, mostraba la primera
+// opción ("Planos municipales") y parecía que el lead no tenía interés.
+function opcionesInteresCRM(interesLead){
+  const lista = INTERESES_CRM.slice();
+  if (interesLead && lista.indexOf(interesLead)===-1) lista.push(interesLead);
+  return lista;
+}
+
+// Plantilla de primer mensaje para un interés. 'Construcción/Refacción' (valor
+// del formulario) usa la de 'Construcción' mientras no tenga una propia guardada.
+function plantillaPrimerContactoCRM(interes){
+  const plantillas = getPlantillasCRM();
+  if (plantillas[interes]) return plantillas[interes];
+  if (interes === 'Construcción/Refacción' && plantillas['Construcción']) return plantillas['Construcción'];
+  return plantillas['Consulta general'];
+}
 function getPlantillasCRM(){
   try{
     const guardadas = JSON.parse(localStorage.getItem('axo_crm_plantillas')||'{}');
@@ -2554,10 +2581,34 @@ function editarPlantillaCRM(interes){
 
 // ── Plantillas de seguimiento (por etapa, no por interés) ────────
 const PLANTILLAS_SEGUIMIENTO_DEFAULT = {
-  'seguimiento1': 'Hola {nombre} 👋 Soy Mónica de AXO Construcciones. Quería saber si pudiste revisar lo que charlamos o si te quedó alguna duda. Quedo atenta 🙂',
-  'seguimiento2': 'Hola {nombre} 👋 Retomo contacto por tu proyecto. Sigo a disposición para lo que necesites 🏗️',
-  'ultimo_seg':   'Hola {nombre} 👋 Te escribo por última vez para saber si seguís interesado/a. Si no es el momento, quedo a disposición para cuando lo sea. Fue un gusto charlar 🙏'
+  'seguimiento1': '¡Hola {nombre}! 😊 ¿Pudiste ver las opciones que te envié? 🏡\n\nSi alguna te llamó la atención, coordinamos una reunión corta para mostrarte los detalles y el alcance ✨ ¿Qué día te queda cómodo? 📅',
+  'seguimiento2': '¡Hola {nombre}! ☀️ Quería saber si seguís pensando en tu proyecto 🏡✨\n\nEn una reunión de 30 minutos te muestro todo lo que incluye, resolvemos tus dudas y vemos juntos cuál es la mejor opción para vos 😊 ¿Te queda bien esta semana?',
+  'ultimo_seg':   '¡Hola {nombre}! 👋 No quiero molestarte, así que este es mi último mensaje 😊\n\nSi en algún momento querés retomar tu proyecto, escribime y coordinamos una reunión cuando te quede cómodo 🏡 ¡Que tengas un lindo día! ☀️'
 };
+
+// Carga única (26/09/2026) de los textos nuevos en las plantillas guardadas
+// (axo_crm_plantillas y axo_crm_plantillas_seg), porque lo guardado en la nube
+// tiene prioridad sobre los textos por defecto. La marca queda dentro de
+// axo_crm_plantillas_seg (que viaja a la nube), así corre una sola vez en total
+// y no pisa ediciones posteriores hechas en otro dispositivo. Solo corre después
+// de la primera bajada de la nube de esta sesión.
+const MARCA_PLANTILLAS_CRM = '20260926';
+function migrarPlantillasCRM20260926(){
+  try{
+    if (!(window.__axoEstado && window.__axoEstado.ultimaBajada)) return false;
+    const seg = JSON.parse(localStorage.getItem('axo_crm_plantillas_seg')||'{}');
+    if (seg.__cargaTextos === MARCA_PLANTILLAS_CRM) return false;
+    const pc = JSON.parse(localStorage.getItem('axo_crm_plantillas')||'{}');
+    pc['Quincho + Piscina'] = PLANTILLAS_DEFAULT['Quincho + Piscina'];
+    pc['Casa Quinta'] = PLANTILLAS_DEFAULT['Casa Quinta'];
+    localStorage.setItem('axo_crm_plantillas', JSON.stringify(pc));
+    ['seguimiento1','seguimiento2','ultimo_seg'].forEach(k=>{ seg[k] = PLANTILLAS_SEGUIMIENTO_DEFAULT[k]; });
+    seg.__cargaTextos = MARCA_PLANTILLAS_CRM;
+    localStorage.setItem('axo_crm_plantillas_seg', JSON.stringify(seg));
+    if (typeof subirNube==='function') { subirNube('axo_crm_plantillas'); subirNube('axo_crm_plantillas_seg'); }
+    return true;
+  }catch(e){ console.warn('migrarPlantillasCRM20260926', e); return false; }
+}
 function getPlantillasSeguimientoCRM(){
   try{
     const guardadas = JSON.parse(localStorage.getItem('axo_crm_plantillas_seg')||'{}');
@@ -2620,7 +2671,7 @@ async function importarLeadsWeb(silencioso){
         telefono: row.telefono || '',
         ciudad: row.ciudad || '',
         origen: 'Web',
-        interes: row.interes || 'Consulta general',
+        interes: (row.interes && String(row.interes).trim()) || 'Consulta general',
         etapa: 'nuevo',
         motivoPerdida: '',
         notas,
@@ -3132,6 +3183,7 @@ function irAFichaPlanner(tipo, id){
 function renderCRM(){
   const contLista = document.getElementById('crm-lista');
   if (!contLista) return;
+  migrarPlantillasCRM20260926();
   const leads = getCRM();
   const q = (document.getElementById('crm-buscar')?.value||'').trim().toLowerCase();
   const filtroEtapa = document.getElementById('crm-filtro-etapa')?.value || 'todas';
@@ -3212,7 +3264,8 @@ function renderLeadDetalle(id){
   const origenesDisponibles = (l.origen === 'Privyr' && !origenesBase.includes('Privyr')) ? ['Privyr', ...origenesBase] : origenesBase;
   const origenOpts = origenesDisponibles.map(o=>'<option value="'+o+'" '+(l.origen===o?'selected':'')+'>'+o+'</option>').join('');
   const plantillas = getPlantillasCRM();
-  const interesOpts = Object.keys(plantillas).map(i=>'<option value="'+i+'" '+(l.interes===i?'selected':'')+'>'+i+'</option>').join('');
+  const interesActual = l.interes || 'Consulta general';
+  const interesOpts = opcionesInteresCRM(interesActual).map(i=>'<option value="'+i.replace(/"/g,'&quot;')+'" '+(interesActual===i?'selected':'')+'>'+i.replace(/</g,'&lt;')+'</option>').join('');
 
   const seg = l.seguimiento || { fecha:'', texto:'', hecho:false };
   const notasHtml = (l.notas||[]).length
@@ -3223,8 +3276,7 @@ function renderLeadDetalle(id){
         + '</div>').join('')
     : '<div style="color:#bbb;font-size:12px">Sin notas todavía.</div>';
 
-  const interesActual = l.interes || 'Consulta general';
-  const mensajePlantilla = (plantillas[interesActual] || plantillas['Consulta general']).replace(/\{nombre\}/g, l.nombre);
+  const mensajePlantilla = plantillaPrimerContactoCRM(interesActual).replace(/\{nombre\}/g, l.nombre);
   const wa = linkWhatsApp(l.telefono, mensajePlantilla);
   const waBtn = l.telefono
     ? '<a class="btn btn-outline btn-sm" target="_blank" href="'+wa+'" onclick="registrarEnvioMensaje(\''+id+'\',\'Primer mensaje\')">📱 WhatsApp</a>'
