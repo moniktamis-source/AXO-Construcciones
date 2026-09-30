@@ -5990,7 +5990,9 @@ function migrarBancoValidado20260927(){
   M.filas.forEach(f => {
     const cod = f[1];
     if (!banco.some(r => r && r[1] === cod)) { banco.push(f.slice()); L.push('rubro ' + cod); }
-    if (!(cod in rendimientos)) rendimientos[cod] = M.nuevas[cod] ? JSON.parse(JSON.stringify(M.nuevas[cod])) : null;
+    // 30/09/2026: los subcontratos (MU.11, PI.08, PI.09) no llevan receta. Antes se les
+    // ponía null y eso rompía recalcularBancoDesdeRecetas() -> no abría ningún presupuesto.
+    if (!(cod in rendimientos) && M.nuevas[cod]) rendimientos[cod] = JSON.parse(JSON.stringify(M.nuevas[cod]));
     if (!ETAPA_AUTO[cod] && M.etapas[cod]) ETAPA_AUTO[cod] = M.etapas[cod];
   });
   Object.keys(M.subs).forEach(cod => { IS_SUB.add(cod); if (!SUB_COD_A_CAT[cod]) SUB_COD_A_CAT[cod] = M.subs[cod]; });
@@ -6283,6 +6285,18 @@ function bancoTieneCambiosSinGuardar(){
   const h = _bancoHuella();
   return h != null && h !== _bancoHuellaAplicada;
 }
+// 30/09/2026: un rubro sin receta (subcontrato) NO debe figurar en rendimientos con
+// valor null: todos los recorridos de Object.keys(rendimientos) leen receta.materiales.
+function limpiarRecetasInvalidas(){
+  let n = 0;
+  Object.keys(rendimientos).forEach(k => {
+    const r = rendimientos[k];
+    if (!r || typeof r !== 'object') { delete rendimientos[k]; n++; return; }
+    if (!Array.isArray(r.materiales)) r.materiales = [];
+    if (!Array.isArray(r.mo)) r.mo = [];
+  });
+  return n;
+}
 function aplicarBancoGuardado(force){
   try{
     const raw = localStorage.getItem('axo_banco');
@@ -6363,6 +6377,10 @@ function aplicarBancoGuardado(force){
           mostrarToastGuardado('🪟 Terminaciones actualizadas: muebles de cocina por módulo, grifería por opción, revestidos, aberturas, pinturas y entorno. Guardá el Banco para dejarlo firme.');
       }, 5600);
     }
+    // 30/09/2026: limpiar recetas null/rotas (subcontratos). Repara los Bancos que ya
+    // quedaron guardados en la nube con MU.11/PI.08/PI.09 = null desde el 26/09.
+    const _nullLimpias = limpiarRecetasInvalidas();
+    if(_nullLimpias > 0) console.warn('[Banco] Recetas vacías (null) quitadas:', _nullLimpias);
     ordenarBanco();
     if (typeof ordenarBanco === 'function') ordenarBanco();
     _bancoUltimoAplicado = raw;
@@ -8102,6 +8120,7 @@ function tieneReceta(cod) {
 function recalcularBancoDesdeRecetas() {
   Object.keys(rendimientos).forEach(cod => {
     const receta = recetaVigente(cod);
+    if (!receta) return;   // 30/09/2026: rubro sin receta (subcontrato) -> no romper el cálculo
     const idx = banco.findIndex(r => r[1] === cod);
     if (idx === -1) return;
 
