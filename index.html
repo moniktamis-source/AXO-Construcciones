@@ -2622,6 +2622,106 @@ function guardarPlantillaSeguimientoCRM(etapa, texto){
   if (typeof subirNube==='function') subirNube('axo_crm_plantillas_seg');
 }
 
+// ── Historial de etapas del lead (oct 2026) ──────────────────────────────
+// Cada lead guarda en `historialEtapas` por qué etapas pasó y cuándo:
+// [{ etapa, fecha (ISO), est? }]. `est:true` = fecha reconstruida (estimada)
+// para movimientos anteriores a esta función, a partir de lo que ya existía:
+// fecha de ingreso, notas automáticas de WhatsApp / pase a Perdido y eventos
+// del Planner. Los movimientos nuevos se registran con fecha y hora exactas.
+function _tsHistLead(f){
+  if (!f) return NaN;
+  const t = new Date(/^\d{4}-\d{2}-\d{2}$/.test(f) ? f+'T12:00:00' : f).getTime();
+  return t;
+}
+function reconstruirHistorialLead(l, id){
+  const resto = [];
+  const visto = {};
+  const notas = (l.notas||[]).slice().reverse(); // de la más vieja a la más nueva
+  const MAPA = [
+    ['Enviado por WhatsApp: Primer mensaje', 'contactado'],
+    ['Enviado por WhatsApp: Seguimiento 1', 'seguimiento1'],
+    ['Enviado por WhatsApp: Seguimiento 2', 'seguimiento2'],
+    ['Enviado por WhatsApp: Último seguimiento', 'ultimo_seg'],
+    ['Pasado a Perdido automáticamente', 'perdido']
+  ];
+  notas.forEach(n=>{
+    if (!n || !n.fecha || !n.texto) return;
+    MAPA.forEach(m=>{
+      if (n.texto.indexOf(m[0])>=0 && !visto[m[1]]) { visto[m[1]] = true; resto.push({ etapa:m[1], fecha:n.fecha, est:true }); }
+    });
+  });
+  try{
+    (getPlannerEventos()||[]).forEach(e=>{
+      if (!e || e.vinculoTipo!=='lead' || e.vinculoId!==id) return;
+      const et = e.tipo==='visita' ? 'visita' : (e.tipo==='reunion' ? 'reuniones' : null);
+      const f = e.creado || e.fecha;
+      if (et && f && !visto[et]) { visto[et] = true; resto.push({ etapa:et, fecha:f, est:true }); }
+    });
+  }catch(e){}
+  resto.sort((a,b)=> _tsHistLead(a.fecha) - _tsHistLead(b.fecha));
+  const hist = [];
+  if (l.creadoEn) hist.push({ etapa:'nuevo', fecha:l.creadoEn });
+  resto.forEach(h=> hist.push(h));
+  const ultimo = hist[hist.length-1];
+  if (!ultimo || ultimo.etapa !== (l.etapa||'nuevo')) {
+    // No hay registro de cuándo entró a la etapa actual: se estima con la
+    // última actividad conocida (última nota, o el último movimiento hallado).
+    let f = (l.notas && l.notas.length && l.notas[0].fecha) ? l.notas[0].fecha : '';
+    if (ultimo && (!f || _tsHistLead(ultimo.fecha) > _tsHistLead(f))) f = ultimo.fecha;
+    if (!f) f = l.creadoEn || '';
+    hist.push({ etapa:(l.etapa||'nuevo'), fecha:f, est:true });
+  }
+  return hist;
+}
+// Historial vigente: el guardado si existe, si no el reconstruido (sin escribir nada).
+function historialEtapasLead(l, id){
+  return (l && Array.isArray(l.historialEtapas) && l.historialEtapas.length) ? l.historialEtapas : reconstruirHistorialLead(l||{}, id);
+}
+// Fecha en que el lead entró a la etapa en la que está ahora.
+function fechaEntradaEtapaLead(l, id){
+  const h = historialEtapasLead(l, id);
+  return h.length ? (h[h.length-1].fecha||'') : '';
+}
+// Llamar ANTES de cambiar l.etapa: fija el historial previo y anota el movimiento.
+function registrarCambioEtapaLead(l, id, nuevaEtapa){
+  if (!l || (l.etapa||'nuevo') === nuevaEtapa) return;
+  if (!Array.isArray(l.historialEtapas) || !l.historialEtapas.length) l.historialEtapas = reconstruirHistorialLead(l, id);
+  l.historialEtapas.push({ etapa:nuevaEtapa, fecha:new Date().toISOString() });
+}
+function _fechaCortaHistLead(f){
+  if (!f) return 's/f';
+  const d = new Date(_tsHistLead(f));
+  if (isNaN(d.getTime())) return f;
+  return d.toLocaleDateString('es-PY', { day:'2-digit', month:'2-digit', year:'2-digit' });
+}
+function _diasEntreHistLead(a, b){
+  const ta = _tsHistLead(a), tb = b ? _tsHistLead(b) : Date.now();
+  if (isNaN(ta) || isNaN(tb)) return null;
+  return Math.max(0, Math.floor((tb - ta) / 86400000));
+}
+function htmlHistorialEtapasLead(l, id){
+  const h = historialEtapasLead(l, id);
+  if (!h.length) return '';
+  let hayEst = false;
+  const filas = h.map((x,i)=>{
+    const et = etapaCRM(x.etapa);
+    const esUltimo = i===h.length-1;
+    const dias = _diasEntreHistLead(x.fecha, esUltimo ? null : h[i+1].fecha);
+    if (x.est) hayEst = true;
+    const hora = (!x.est && x.fecha && x.fecha.length>10) ? ' '+new Date(x.fecha).toLocaleTimeString('es-PY',{hour:'2-digit',minute:'2-digit'}) : '';
+    return '<div style="display:flex;gap:10px;align-items:center;padding:5px 0;border-bottom:1px solid #f5f5f5;font-size:12px">'
+      + '<span style="color:#666;white-space:nowrap;width:104px">'+(x.est?'≈ ':'')+_fechaCortaHistLead(x.fecha)+hora+'</span>'
+      + '<span style="background:'+et.color+';color:#fff;padding:1px 8px;border-radius:8px;white-space:nowrap">'+et.label+'</span>'
+      + '<span style="color:#999;flex:1">'+(dias===null?'':(esUltimo?'hace '+dias+' día(s) — etapa actual':dias+' día(s) en esta etapa'))+'</span>'
+      + '</div>';
+  }).join('');
+  return '<div style="background:#F6F8F5;border-radius:8px;padding:12px;margin-bottom:16px">'
+    + '<div style="font-weight:700;font-size:12px;color:#4A6741;margin-bottom:6px">🧭 Recorrido por etapas</div>'
+    + filas
+    + (hayEst ? '<div style="font-size:11px;color:#999;margin-top:6px">≈ fecha estimada con los datos que ya estaban cargados (ingreso, mensajes enviados, Planner). Los movimientos desde ahora quedan con fecha y hora exactas.</div>' : '')
+    + '</div>';
+}
+
 function getCRM(){ try{ return JSON.parse(localStorage.getItem('axo_crm')||'{}'); }catch(e){ return {}; } }
 function guardarCRM(obj){
   try{
@@ -2727,6 +2827,7 @@ function seleccionarLead(id){ leadSeleccionado = id; renderCRM(); }
 function setLeadCampo(id, campo, val){
   const leads = getCRM();
   if (!leads[id]) return;
+  if (campo === 'etapa') registrarCambioEtapaLead(leads[id], id, val);
   leads[id][campo] = val;
   guardarCRM(leads);
   renderCRM();
@@ -2833,6 +2934,7 @@ function autoMarcarLeadsPerdidos(){
     if (!ultimaAct) return;
     const diasDesde = (Date.now() - new Date(ultimaAct).getTime()) / 86400000;
     if (diasDesde < 15) return;
+    registrarCambioEtapaLead(l, id, 'perdido');
     l.etapa = 'perdido';
     l.motivoPerdida = l.motivoPerdida || 'Sin respuesta tras seguimiento (15+ días sin actividad — automático)';
     if (!l.notas) l.notas = [];
@@ -3214,7 +3316,14 @@ function renderCRM(){
   let entradas = Object.entries(leads).map(([id,l])=>({id,...l}));
   if (q) entradas = entradas.filter(l => (l.nombre||'').toLowerCase().includes(q));
   if (filtroEtapa!=='todas') entradas = entradas.filter(l => l.etapa===filtroEtapa);
-  entradas.sort((a,b)=> (a.nombre||'').localeCompare(b.nombre||''));
+  // Orden: por fecha de entrada a la etapa actual, los más antiguos arriba
+  // (los que llevan más tiempo esperando). Sin fecha → al final. Empate → nombre.
+  entradas.forEach(l=>{ l._fEtapa = fechaEntradaEtapaLead(l, l.id); l._tEtapa = _tsHistLead(l._fEtapa); });
+  entradas.sort((a,b)=>{
+    const ta = isNaN(a._tEtapa) ? Infinity : a._tEtapa, tb = isNaN(b._tEtapa) ? Infinity : b._tEtapa;
+    if (ta !== tb) return ta - tb;
+    return (a.nombre||'').localeCompare(b.nombre||'');
+  });
 
   if (!entradas.length) {
     contLista.innerHTML = '<div class="alert alert-warn">'+(q||filtroEtapa!=='todas' ? 'Ningún lead coincide con el filtro.' : 'Todavía no cargaste ningún lead. Tocá "+ Nuevo lead" para empezar.')+'</div>';
@@ -3241,6 +3350,7 @@ function renderCRM(){
       return '<div onclick="seleccionarLead(\''+l.id+'\')" style="cursor:pointer;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:'+(activo?'#E8F0E5':'#fff')+';border:1px solid '+(activo?'#4A6741':(frio?'#C00':'#eee'))+'">'
         + '<div style="font-weight:700;font-size:13px;color:#333">'+l.nombre+badge+'</div>'
         + '<div style="font-size:11px;color:#888;margin-top:2px"><span style="background:'+et.color+';color:#fff;padding:1px 7px;border-radius:8px">'+et.label+'</span>'+(l.origen?' · '+l.origen:'')+(l.telefono?' · '+l.telefono:'')+(l.creadoEn?' · ingresó '+formatFechaHoraLead(l.creadoEn):'')+'</div>'
+        + (l._fEtapa ? '<div style="font-size:11px;color:#4A6741;margin-top:3px">📍 En esta etapa desde '+_fechaCortaHistLead(l._fEtapa)+(function(){ const d=_diasEntreHistLead(l._fEtapa); return d===null?'':' · '+d+' día(s)'; })()+'</div>' : '')
         + '</div>';
     }).join('');
   }
@@ -3327,6 +3437,7 @@ function renderLeadDetalle(id){
       + perdidaHtml
       + seguimientoMsgHtml
       + convertirHtml
+      + htmlHistorialEtapasLead(l, id)
 
       + '<div style="background:#FFF8F0;border-radius:8px;padding:12px;margin-bottom:16px">'
         + '<div style="font-weight:700;font-size:12px;color:#E65100;margin-bottom:8px">📌 Próximo seguimiento</div>'
