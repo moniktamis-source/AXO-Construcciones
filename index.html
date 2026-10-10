@@ -2523,19 +2523,19 @@ function formatFechaHoraLead(iso){
 
 // ── Plantillas de primer mensaje por interés (editables por el usuario) ──
 const PLANTILLAS_DEFAULT = {
-  'Planos municipales':      'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre planos municipales 📋 Te acompañamos en todo el trámite para que sea simple y ágil. Contame en qué etapa está el inmueble y te confirmo los próximos pasos.',
-  'Construcción':            'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu interés en construir 🏗️ Contame el metraje que tenés en mente, el terreno y para cuándo te gustaría arrancar, y te preparo una propuesta a medida.',
-  'Refacción':               'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre refacción o ampliación 🔨 Contame qué querés mejorar y el estado actual del espacio, y te armo una propuesta a medida.',
-  'Proyecto residencial':    'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu interés en construir tu casa propia 🏠 Contame sobre tu terreno y cómo imaginás tu hogar, y armamos juntos una propuesta a medida.',
-  'Proyecto Comercial':      'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre tu proyecto comercial 🏢 Contame el rubro y el espacio que necesitás, y vemos la mejor forma de concretarlo.',
-  'Carpeta AFD':             'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta sobre la carpeta AFD 📁 Te acompañamos con toda la documentación para que el trámite sea ágil. Contame los datos del inmueble y arrancamos.',
-  'Quincho + Piscina':       '¡Hola {nombre}! 👋 Soy Monica, de AXO Construcciones 🏡\n\n¡Gracias por tu interés en nuestro Quincho + Piscina! 💦🔥 Te comparto las 3 opciones que tenemos, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu espacio 📐 ¿Te queda mejor esta semana o la próxima? 📅',
-  'Casa Quinta':             '¡Hola {nombre}! 👋 Soy Monica, de AXO Construcciones 🌴\n\n¡Gracias por tu interés en nuestra Casa Quinta! 🏡 Te comparto las 3 opciones: muralla con iluminación y portón, quincho con parrilla y piscina con cascada, todo llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu terreno 📐 ¿Te queda mejor esta semana o la próxima? 📅',
+  'Planos municipales':      'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu consulta sobre planos municipales 📋 Te acompañamos en todo el trámite para que sea simple y ágil. Contame en qué etapa está el inmueble y te confirmo los próximos pasos.',
+  'Construcción':            'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu interés en construir 🏗️ Contame el metraje que tenés en mente, el terreno y para cuándo te gustaría arrancar, y te preparo una propuesta a medida.',
+  'Refacción':               'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu consulta sobre refacción o ampliación 🔨 Contame qué querés mejorar y el estado actual del espacio, y te armo una propuesta a medida.',
+  'Proyecto residencial':    'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu interés en construir tu casa propia 🏠 Contame sobre tu terreno y cómo imaginás tu hogar, y armamos juntos una propuesta a medida.',
+  'Proyecto Comercial':      'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu consulta sobre tu proyecto comercial 🏢 Contame el rubro y el espacio que necesitás, y vemos la mejor forma de concretarlo.',
+  'Carpeta AFD':             'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu consulta sobre la carpeta AFD 📁 Te acompañamos con toda la documentación para que el trámite sea ágil. Contame los datos del inmueble y arrancamos.',
+  'Quincho + Piscina':       '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🏡\n\n¡Gracias por tu interés en nuestro Quincho + Piscina! 💦🔥 Te comparto las 3 opciones que tenemos, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu espacio 📐 ¿Te queda mejor esta semana o la próxima? 📅',
+  'Casa Quinta':             '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🌴\n\n¡Gracias por tu interés en nuestra Casa Quinta! 🏡 Te comparto las 3 opciones: muralla con iluminación y portón, quincho con parrilla y piscina con cascada, todo llave en mano ✨\n\n¿Cuál es la que más te gusta? 😊\n\nMe encantaría mostrarte todos los detalles y el alcance de la opción que elijas en una reunión corta, así la adaptamos a tu terreno 📐 ¿Te queda mejor esta semana o la próxima? 📅',
   'Casa de una planta':      '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🏡\n\nTe comparto las opciones de casa de una planta, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál te gusta más? 😊 Si querés, coordinamos una reunión corta para ver los detalles 📅',
   'Casa de dos plantas':     '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🏡\n\nTe comparto las opciones de casa de dos plantas, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál te gusta más? 😊 Si querés, coordinamos una reunión corta para ver los detalles 📅',
   'Baño':                    '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🏡\n\nTe comparto las opciones para renovar tu baño, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál te gusta más? 😊 Si querés, coordinamos una reunión corta para ver los detalles 📅',
   'Cocina':                  '¡Hola {nombre}! 👋 Soy Daissy, de AXO Construcciones 🏡\n\nTe comparto las opciones para renovar tu cocina, con lo que incluye cada una y su precio llave en mano ✨\n\n¿Cuál te gusta más? 😊 Si querés, coordinamos una reunión corta para ver los detalles 📅',
-  'Consulta general':        'Hola {nombre}, soy Mónica, de AXO Construcciones 👋 Vi tu consulta y quiero ayudarte 🙂 Contame un poco más sobre lo que necesitás y vemos juntos cómo darle forma a tu proyecto.'
+  'Consulta general':        'Hola {nombre}, soy Daissy, de AXO Construcciones 👋 Vi tu consulta y quiero ayudarte 🙂 Contame un poco más sobre lo que necesitás y vemos juntos cómo darle forma a tu proyecto.'
 };
 
 // Categorías de interés del CRM, en el orden en que se muestran. Son los mismos
@@ -2613,6 +2613,24 @@ function migrarPlantillasCRM20260926(){
     if (typeof subirNube==='function') { subirNube('axo_crm_plantillas'); subirNube('axo_crm_plantillas_seg'); }
     return true;
   }catch(e){ console.warn('migrarPlantillasCRM20260926', e); return false; }
+}
+// Carga única (10/10/2026): quien responde los leads es Daissy. Cambia "Soy Monica"
+// por "Soy Daissy" en las plantillas de primer contacto guardadas (lo guardado en la
+// nube tiene prioridad sobre los textos por defecto). Misma mecánica que la carga del
+// 26/09: marca dentro de axo_crm_plantillas_seg y solo después de la primera bajada.
+function migrarPlantillasCRM20261010(){
+  try{
+    if (!(window.__axoEstado && window.__axoEstado.ultimaBajada)) return false;
+    const seg = JSON.parse(localStorage.getItem('axo_crm_plantillas_seg')||'{}');
+    if (seg.__firmaDaissy === '20261010') return false;
+    const pc = JSON.parse(localStorage.getItem('axo_crm_plantillas')||'{}');
+    Object.keys(pc).forEach(k=>{ if (typeof pc[k]==='string') pc[k] = pc[k].replace(/soy M[oó]nica/g,'soy Daissy').replace(/Soy M[oó]nica/g,'Soy Daissy'); });
+    localStorage.setItem('axo_crm_plantillas', JSON.stringify(pc));
+    seg.__firmaDaissy = '20261010';
+    localStorage.setItem('axo_crm_plantillas_seg', JSON.stringify(seg));
+    if (typeof subirNube==='function') { subirNube('axo_crm_plantillas'); subirNube('axo_crm_plantillas_seg'); }
+    return true;
+  }catch(e){ console.warn('migrarPlantillasCRM20261010', e); return false; }
 }
 function getPlantillasSeguimientoCRM(){
   try{
@@ -3291,6 +3309,7 @@ function renderCRM(){
   const contLista = document.getElementById('crm-lista');
   if (!contLista) return;
   migrarPlantillasCRM20260926();
+  migrarPlantillasCRM20261010();
   const leads = getCRM();
   const q = (document.getElementById('crm-buscar')?.value||'').trim().toLowerCase();
   const filtroEtapa = document.getElementById('crm-filtro-etapa')?.value || 'todas';
