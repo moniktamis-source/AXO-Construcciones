@@ -7580,7 +7580,10 @@ function obtenerVencimientosProyecto(vto, cod2desc) {
     const fGarantia = sumarMeses(vto.actaEntrega, 24);
     const fRetencion = sumarDiasHabilesDesde(vto.actaEntrega, 5);
     items.push({ tipo:'garantia', label:'Vencimiento de garantía (24m)', fecha:fGarantia, dias:diasRestantes(fGarantia) });
-    items.push({ tipo:'retencion', label:'Liberación de retención (5 días hábiles)', fecha:fRetencion, dias:diasRestantes(fRetencion) });
+    // 20/10/2026: la retención se puede marcar como cobrada (vto.retencionCobrada = 'YYYY-MM-DD').
+    // Una vez cobrada deja de contar como vencimiento pendiente; la garantía sigue su curso.
+    const cobrada = vto.retencionCobrada || '';
+    items.push({ tipo:'retencion', label: cobrada ? 'Retención cobrada' : 'Liberación de retención (5 días hábiles)', fecha:fRetencion, dias:diasRestantes(fRetencion), pagado: !!cobrada, fechaPago: cobrada });
   }
   if (vto && vto.subcontratos) {
     Object.entries(vto.subcontratos).forEach(([cod, fechaStr]) => {
@@ -7591,6 +7594,11 @@ function obtenerVencimientosProyecto(vto, cod2desc) {
     });
   }
   return items.sort((a,b) => a.fecha - b.fecha);
+}
+
+// Único criterio de "vencimiento que requiere atención": dentro de 15 días o vencido, y no pagado.
+function vencimientoPendienteProximo(it) {
+  return !it.pagado && it.dias <= 15;
 }
 
 // Panel del proyecto actualmente abierto (Costeo)
@@ -7616,6 +7624,17 @@ function renderVencimientos() {
 
   if (items.length) {
     html += `<div>` + items.map(it => {
+      if (it.pagado) {
+        return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;background:#EAFBEA;gap:10px">
+          <span>✅ ${it.label}</span>
+          <span style="display:flex;align-items:center;gap:8px;white-space:nowrap">
+            <span style="color:#2E7D32;font-weight:700">Cobrada el ${fmtFechaCorta(new Date(it.fechaPago + 'T00:00:00'))}</span>
+            <button class="btn btn-outline btn-sm" onclick="setRetencionCobrada('')" title="Volver a pendiente">↩︎ Deshacer</button>
+          </span>
+        </div>`;
+      }
+      const btnCobrar = it.tipo === 'retencion'
+        ? `<button class="btn btn-outline btn-sm" style="margin-left:8px" onclick="marcarRetencionCobrada()" title="El cliente ya pagó la retención">✔ Marcar cobrada</button>` : '';
       const vencido = it.dias < 0;
       const proximo = it.dias >= 0 && it.dias <= 15;
       const color = vencido ? '#B23B3B' : (proximo ? '#C05000' : '#555');
@@ -7623,7 +7642,7 @@ function renderVencimientos() {
       const txtDias = vencido ? `vencido hace ${Math.abs(it.dias)} día(s)` : (it.dias===0 ? 'vence hoy' : `en ${it.dias} día(s)`);
       return `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 14px;border-bottom:1px solid #f0f0f0;font-size:12px;background:${bg}">
         <span>${it.label}</span>
-        <span style="color:${color};font-weight:700;white-space:nowrap">${fmtFechaCorta(it.fecha)} &nbsp;(${txtDias})</span>
+        <span style="color:${color};font-weight:700;white-space:nowrap">${fmtFechaCorta(it.fecha)} &nbsp;(${txtDias})${btnCobrar}</span>
       </div>`;
     }).join('') + `</div>`;
   }
@@ -7654,6 +7673,21 @@ function setActaEntrega(val) {
   autosaveSeguimiento();
 }
 
+// 20/10/2026: marcar la retención como cobrada (el cliente ya pagó). Pide la fecha de cobro (hoy por defecto).
+function marcarRetencionCobrada() {
+  const hoy = new Date();
+  const def = hoy.getFullYear() + '-' + String(hoy.getMonth()+1).padStart(2,'0') + '-' + String(hoy.getDate()).padStart(2,'0');
+  const f = prompt('Fecha en que el cliente pagó la retención (AAAA-MM-DD):', def);
+  if (f === null) return;
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(f.trim())) { alert('Fecha no válida. Usá el formato AAAA-MM-DD.'); return; }
+  setRetencionCobrada(f.trim());
+}
+function setRetencionCobrada(val) {
+  if (val) vencimientos.retencionCobrada = val; else delete vencimientos.retencionCobrada;
+  renderVencimientos();
+  autosaveSeguimiento();
+}
+
 function setVencimientoSubcontrato(cod, val) {
   vencimientos.subcontratos = vencimientos.subcontratos || {};
   if (val) vencimientos.subcontratos[cod] = val; else delete vencimientos.subcontratos[cod];
@@ -7673,7 +7707,7 @@ function auditarVencimientosTodasLasObras() {
     if (!p || !(p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado')) return;
     if (!p.vencimientos) return;
     const cod2desc = cod => { const r = (BANCO_BASE||[]).find(x=>x[1]===cod); return r ? r[2] : cod; };
-    const items = obtenerVencimientosProyecto(p.vencimientos, cod2desc).filter(it => it.dias <= 15);
+    const items = obtenerVencimientosProyecto(p.vencimientos, cod2desc).filter(vencimientoPendienteProximo);
     if (items.length) resultados.push({ nombre, items });
   });
 
@@ -19386,7 +19420,7 @@ function renderListaProyectos() {
     let vencBadge = '';
     if ((p.estadoProyecto === 'aprobado' || p.estadoProyecto === 'finalizado') && p.vencimientos) {
       const cod2desc = cod => { const r = (BANCO_BASE||[]).find(x=>x[1]===cod); return r ? r[2] : cod; };
-      const vitems = obtenerVencimientosProyecto(p.vencimientos, cod2desc).filter(it => it.dias <= 15);
+      const vitems = obtenerVencimientosProyecto(p.vencimientos, cod2desc).filter(vencimientoPendienteProximo);
       if (vitems.length) {
         const detalleV = vitems.map(it => it.label + ': ' + fmtFechaCorta(it.fecha)).join(' · ');
         vencBadge = `<span title="${detalleV.replace(/"/g,"'")}" style="display:inline-block;margin-left:8px;font-size:11px;font-weight:700;color:#C05000;background:#FFF3E0;border-radius:10px;padding:2px 9px">📅 ${vitems.length} vencimiento(s) próximo(s)</span>`;
