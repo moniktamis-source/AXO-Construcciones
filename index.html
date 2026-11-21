@@ -1630,6 +1630,7 @@
       <div style="display:flex;gap:8px;margin-bottom:14px">
         <button class="btn btn-sm" id="crm-btn-vista-leads" onclick="crmMostrarVista('leads')">📋 Leads</button>
         <button class="btn btn-sm btn-outline" id="crm-btn-vista-planner" onclick="crmMostrarVista('planner')">📅 Planner</button>
+        <button class="btn btn-sm btn-outline" id="crm-btn-vista-arm" onclick="crmMostrarVista('arm')">🤖 ARM WhatsApp</button>
       </div>
 
       <div id="crm-vista-leads">
@@ -1645,6 +1646,35 @@
         <div class="grid-lista-detalle">
           <div id="crm-lista" style="max-height:70vh;overflow-y:auto"></div>
           <div id="crm-detalle"></div>
+        </div>
+      </div>
+
+      <div id="crm-vista-arm" style="display:none">
+        <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:10px">
+          <div id="arm-modo"></div>
+          <div style="flex:1"></div>
+          <span style="font-size:11px;color:#888">Lo que el asistente averiguó en cada chat de WhatsApp</span>
+        </div>
+        <div id="arm-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+          <input id="arm-buscar" class="form-input" placeholder="🔍 Buscar por nombre, número, producto o ciudad..." style="flex:1;min-width:200px" oninput="renderARM(false)">
+          <select id="arm-filtro-estado" class="form-input" style="max-width:190px" onchange="renderARM(false)">
+            <option value="todos">Todos los chats</option>
+            <option value="claude">🤖 Los atiende el ARM</option>
+            <option value="equipo">🙋 Los atiende el equipo</option>
+          </select>
+          <select id="arm-filtro-calif" class="form-input" style="max-width:170px" onchange="renderARM(false)">
+            <option value="todas">Toda calificación</option>
+            <option value="caliente">🔥 Caliente</option>
+            <option value="tibio">🌤 Tibio</option>
+            <option value="no_califica">✖ No califica</option>
+            <option value="sin_datos">… Sin datos</option>
+          </select>
+          <button class="btn btn-outline btn-sm" onclick="renderARM(true)">🔄 Actualizar</button>
+        </div>
+        <div class="grid-lista-detalle">
+          <div id="arm-lista" style="max-height:70vh;overflow-y:auto"></div>
+          <div id="arm-detalle"></div>
         </div>
       </div>
 
@@ -3044,18 +3074,248 @@ const PLANNER_TIPOS = {
 
 // Alterna entre la vista de Leads y la vista de Planner dentro de CRM
 function crmMostrarVista(vista){
-  const vLeads = document.getElementById('crm-vista-leads');
-  const vPlanner = document.getElementById('crm-vista-planner');
-  const bLeads = document.getElementById('crm-btn-vista-leads');
-  const bPlanner = document.getElementById('crm-btn-vista-planner');
-  if (!vLeads || !vPlanner) return;
-  const esPlanner = vista === 'planner';
-  vLeads.style.display = esPlanner ? 'none' : 'block';
-  vPlanner.style.display = esPlanner ? 'block' : 'none';
-  if (bLeads) bLeads.classList.toggle('btn-outline', esPlanner);
-  if (bPlanner) bPlanner.classList.toggle('btn-outline', !esPlanner);
-  if (esPlanner) renderPlanner();
+  const vistas = ['leads','planner','arm'];
+  if (vistas.indexOf(vista) === -1) vista = 'leads';
+  if (!document.getElementById('crm-vista-leads') || !document.getElementById('crm-vista-planner')) return;
+  vistas.forEach(function(v){
+    const div = document.getElementById('crm-vista-'+v);
+    const btn = document.getElementById('crm-btn-vista-'+v);
+    if (div) div.style.display = (v === vista) ? 'block' : 'none';
+    if (btn) btn.classList.toggle('btn-outline', v !== vista);
+  });
+  if (vista === 'planner') renderPlanner();
+  if (vista === 'arm') renderARM(true);
 }
+
+// ════════════════════════════════════════════════════════
+// 21/11/2026 — PANEL DEL ARM (asistente de WhatsApp)
+// Lee las tablas arm_chats / arm_mensajes de Supabase (las escribe la
+// función arm-whatsapp). No se guarda nada en el equipo: siempre se consulta
+// la nube, así todas ven lo mismo.
+// ════════════════════════════════════════════════════════
+let armChats = [], armConfig = {}, armChatSel = null, armCargando = false;
+const ARM_CALIF = {
+  caliente:    { label:'🔥 Caliente',  color:'#C62828' },
+  tibio:       { label:'🌤 Tibio',     color:'#E65100' },
+  no_califica: { label:'✖ No califica', color:'#757575' },
+  sin_datos:   { label:'… Sin datos',  color:'#9E9E9E' },
+};
+function armEsc(t){ return String(t==null?'':t).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+function armTel(t){
+  let d = String(t||'').replace(/\D/g,'');
+  if (d.indexOf('00')===0) d = d.slice(2);
+  if (d.indexOf('0')===0) d = '595' + d.slice(1);
+  if (d.length===9 && d.charAt(0)==='9') d = '595' + d;
+  return d;
+}
+function armFecha(iso){
+  if(!iso) return '';
+  try { return new Date(iso).toLocaleString('es-PY',{ day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }); } catch(e){ return ''; }
+}
+// "2026-11-24" → "mar 24/11"
+function armDia(f){
+  if(!/^\d{4}-\d{2}-\d{2}$/.test(String(f||''))) return armEsc(f);
+  const d = new Date(f+'T12:00:00');
+  return ['dom','lun','mar','mié','jue','vie','sáb'][d.getDay()]+' '+f.slice(8,10)+'/'+f.slice(5,7);
+}
+function armChatDeTelefono(tel){
+  const t = armTel(tel);
+  if(!t) return null;
+  return armChats.find(function(c){ return c.chat_id === t; }) || null;
+}
+async function armCargar(){
+  if(!supa) return false;
+  armCargando = true;
+  try{
+    const r1 = await supa.from('arm_chats').select('chat_id,nombre,ciudad,interes,producto,detalle,calificacion,datos,estado,derivado_motivo,derivado_en,origen,creado,actualizado').order('actualizado',{ ascending:false });
+    if(r1.error){ console.warn('[ARM] no se pudieron leer los chats', r1.error); armCargando=false; return false; }
+    armChats = r1.data || [];
+    const r2 = await supa.from('arm_config').select('clave,valor').in('clave',['modo']);
+    armConfig = {};
+    (r2.data||[]).forEach(function(f){ armConfig[f.clave] = f.valor; });
+  }catch(e){ console.warn('[ARM]', e); armCargando=false; return false; }
+  armCargando = false;
+  return true;
+}
+async function renderARM(recargar){
+  const lista = document.getElementById('arm-lista');
+  if(!lista) return;
+  if(recargar || !armChats.length){
+    lista.innerHTML = '<div style="color:#999;padding:20px;text-align:center">Cargando chats del ARM…</div>';
+    const ok = await armCargar();
+    if(!ok){ lista.innerHTML = '<div class="alert alert-warn">No se pudieron leer los chats del ARM. Revisá que hayas iniciado sesión.</div>'; return; }
+  }
+  const q = (document.getElementById('arm-buscar')?.value||'').trim().toLowerCase();
+  const fEstado = document.getElementById('arm-filtro-estado')?.value || 'todos';
+  const fCalif = document.getElementById('arm-filtro-calif')?.value || 'todas';
+
+  const modo = armConfig.modo;
+  const modoEl = document.getElementById('arm-modo');
+  if(modoEl) modoEl.innerHTML = modo==='auto'
+    ? '<span style="background:#2E7D32;color:#fff;padding:3px 10px;border-radius:10px;font-size:11px">🟢 Atiende a todos los leads</span>'
+    : '<span style="background:#F9A825;color:#333;padding:3px 10px;border-radius:10px;font-size:11px">🧪 Modo prueba: solo números de prueba</span>';
+
+  // Resumen
+  const res = document.getElementById('arm-resumen');
+  if(res){
+    const n = function(fn){ return armChats.filter(fn).length; };
+    const caja = function(txt, val, color, onclick){
+      return '<div '+(onclick?'onclick="'+onclick+'" ':'')+'style="'+(onclick?'cursor:pointer;':'')+'background:'+color+';color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600">'+txt+': '+val+'</div>';
+    };
+    res.innerHTML = caja('Chats', armChats.length, '#4A6741', "armFiltrar('todos','todas')")
+      + caja('🔥 Calientes', n(function(c){return c.calificacion==='caliente';}), '#C62828', "armFiltrar('todos','caliente')")
+      + caja('🌤 Tibios', n(function(c){return c.calificacion==='tibio';}), '#E65100', "armFiltrar('todos','tibio')")
+      + caja('🙋 Con el equipo', n(function(c){return c.estado==='equipo';}), '#1565C0', "armFiltrar('equipo','todas')")
+      + caja('📅 Con reunión o visita', n(function(c){return c.datos && c.datos.reunion;}), '#7B1FA2', null);
+  }
+
+  let chats = armChats.slice();
+  if(q) chats = chats.filter(function(c){ return ((c.nombre||'')+' '+(c.chat_id||'')+' '+(c.producto||'')+' '+(c.ciudad||'')).toLowerCase().indexOf(q) !== -1; });
+  if(fEstado!=='todos') chats = chats.filter(function(c){ return c.estado===fEstado; });
+  if(fCalif!=='todas') chats = chats.filter(function(c){ return (c.calificacion||'sin_datos')===fCalif; });
+
+  if(!chats.length){
+    lista.innerHTML = '<div class="alert alert-warn">'+(armChats.length ? 'Ningún chat coincide con el filtro.' : 'El ARM todavía no atendió ningún chat.')+'</div>';
+  } else {
+    lista.innerHTML = chats.map(function(c){
+      const cal = ARM_CALIF[c.calificacion||'sin_datos'] || ARM_CALIF.sin_datos;
+      const activo = c.chat_id===armChatSel;
+      const est = c.estado==='equipo'
+        ? '<span style="background:#1565C0;color:#fff;font-size:10px;padding:1px 7px;border-radius:8px">🙋 Equipo</span>'
+        : '<span style="background:#4A6741;color:#fff;font-size:10px;padding:1px 7px;border-radius:8px">🤖 ARM</span>';
+      const reu = c.datos && c.datos.reunion ? ' · 📅 '+armDia(c.datos.reunion.fecha)+' '+armEsc(c.datos.reunion.hora) : '';
+      return '<div onclick="armSeleccionar(\''+c.chat_id+'\')" style="cursor:pointer;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:'+(activo?'#E8F0E5':'#fff')+';border:1px solid '+(activo?'#4A6741':'#eee')+'">'
+        + '<div style="font-weight:700;font-size:13px;color:#333">'+armEsc(c.nombre||('+'+c.chat_id))+' <span style="background:'+cal.color+';color:#fff;font-size:10px;padding:1px 7px;border-radius:8px;margin-left:4px">'+cal.label+'</span></div>'
+        + '<div style="font-size:11px;color:#888;margin-top:3px">'+est+' · '+armEsc(c.producto||c.interes||'Sin producto')+((c.datos&&c.datos.ciudad)||c.ciudad?' · '+armEsc((c.datos&&c.datos.ciudad)||c.ciudad):'')+reu+'</div>'
+        + '<div style="font-size:11px;color:#aaa;margin-top:2px">Último movimiento '+armFecha(c.actualizado)+(c.origen==='whatsapp_directo'?' · escribió directo':'')+'</div>'
+        + '</div>';
+    }).join('');
+  }
+
+  if(armChatSel && armChats.some(function(c){ return c.chat_id===armChatSel; })) armRenderDetalle(armChatSel);
+  else { const d=document.getElementById('arm-detalle'); if(d) d.innerHTML = '<div class="card"><div class="card-body" style="color:#999;text-align:center;padding:40px">Elegí un chat de la lista para ver la conversación.</div></div>'; }
+}
+function armFiltrar(estado, calif){
+  const e=document.getElementById('arm-filtro-estado'), c=document.getElementById('arm-filtro-calif');
+  if(e) e.value = estado; if(c) c.value = calif;
+  renderARM(false);
+}
+function armSeleccionar(chatId){ armChatSel = chatId; renderARM(false); }
+
+async function armRenderDetalle(chatId){
+  const cont = document.getElementById('arm-detalle');
+  if(!cont) return;
+  const c = armChats.find(function(x){ return x.chat_id===chatId; });
+  if(!c){ cont.innerHTML=''; return; }
+  const d = c.datos || {};
+  const cal = ARM_CALIF[c.calificacion||'sin_datos'] || ARM_CALIF.sin_datos;
+  const fila = function(label, val){ return val ? '<div style="font-size:12px;margin-bottom:4px"><span style="color:#888">'+label+':</span> '+val+'</div>' : ''; };
+  const lead = Object.entries(getCRM()).find(function(e){ return armTel(e[1].telefono)===chatId; });
+
+  const botones = (c.estado==='equipo'
+      ? '<button class="btn btn-primary btn-sm" onclick="armCambiarEstado(\''+chatId+'\',\'claude\')" title="El ARM vuelve a responder este chat">🤖 Devolver a Claude</button>'
+      : '<button class="btn btn-outline btn-sm" onclick="armCambiarEstado(\''+chatId+'\',\'equipo\')" title="El ARM deja de responder; lo atienden ustedes">🙋 Tomar el chat</button>')
+    + ' <a class="btn btn-outline btn-sm" target="_blank" href="https://wa.me/'+chatId+'">📱 Abrir WhatsApp</a>'
+    + (lead ? ' <button class="btn btn-outline btn-sm" onclick="armIrALead(\''+lead[0]+'\')">🎯 Ver lead en CRM</button>' : '');
+
+  const reu = d.reunion ? (d.reunion.tipo==='visita'?'🚧 Visita ':'🤝 Reunión ')+armDia(d.reunion.fecha)+' '+armEsc(d.reunion.hora)+(d.reunion.modalidad?' · '+armEsc(d.reunion.modalidad):'') : '';
+  const ubic = d.ubicacion ? '<a target="_blank" href="'+armEsc(d.ubicacion)+'">📍 ver en el mapa</a>' : '';
+
+  cont.innerHTML = '<div class="card">'
+    + '<div class="card-header dark" style="display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap">'
+      + '<span>'+armEsc(c.nombre||('+'+chatId))+' <span style="font-weight:400;font-size:11px;opacity:0.8">+'+chatId+'</span></span>'
+      + '<span style="background:'+cal.color+';color:#fff;font-size:11px;padding:2px 9px;border-radius:8px">'+cal.label+'</span>'
+    + '</div>'
+    + '<div class="card-body">'
+      + '<div style="margin-bottom:12px">'+botones+'</div>'
+      + '<div class="grid-2" style="gap:6px 16px;margin-bottom:12px">'
+        + '<div>'
+          + fila('Producto', armEsc(c.producto||c.interes||''))
+          + fila('Detalle', armEsc(c.detalle||''))
+          + fila('Ciudad', armEsc(d.ciudad||c.ciudad||''))
+          + fila('Terreno', armEsc(d.terreno||''))
+          + fila('Cuándo', armEsc(d.cuando||''))
+        + '</div><div>'
+          + fila('Opción elegida', armEsc(d.opcion||''))
+          + fila('Objeción', armEsc(d.objecion||''))
+          + fila('Agendado', reu)
+          + fila('Ubicación', ubic)
+          + fila('Derivado', c.derivado_motivo ? armEsc(c.derivado_motivo)+' · '+armFecha(c.derivado_en) : '')
+          + fila('Estado', c.estado==='equipo' ? '🙋 Lo atiende el equipo (el ARM no responde)' : '🤖 Lo atiende el ARM')
+        + '</div>'
+      + '</div>'
+      + '<div style="font-weight:700;font-size:12px;color:#555;margin-bottom:6px">💬 Conversación</div>'
+      + '<div id="arm-conversacion" style="background:#EFEAE2;border-radius:8px;padding:10px;max-height:55vh;overflow-y:auto"><div style="color:#999;text-align:center;padding:10px">Cargando…</div></div>'
+    + '</div></div>';
+
+  const r = await supa.from('arm_mensajes').select('autor,texto,archivo,creado').eq('chat_id', chatId).order('id',{ ascending:true }).limit(300);
+  const conv = document.getElementById('arm-conversacion');
+  if(!conv || armChatSel!==chatId) return;
+  if(r.error){ conv.innerHTML = '<div style="color:#C00">No se pudo leer la conversación.</div>'; return; }
+  const msgs = r.data || [];
+  if(!msgs.length){ conv.innerHTML = '<div style="color:#999;text-align:center">Sin mensajes todavía.</div>'; return; }
+  conv.innerHTML = msgs.map(function(m){
+    const cliente = m.autor==='cliente';
+    const quien = cliente ? '' : (m.autor==='equipo' ? '🙋 Equipo' : '🤖 ARM');
+    let cuerpo = armEsc(m.texto||'').replace(/(https?:\/\/[^\s<]+)/g, '<a target="_blank" href="$1">$1</a>').replace(/\n/g,'<br>');
+    if(m.archivo){
+      const url = /^https?:/.test(m.archivo) ? m.archivo : (SUPABASE_URL+'/storage/v1/object/public/arm-material/'+m.archivo.split('/').map(encodeURIComponent).join('/'));
+      const nombre = m.archivo.split('/').pop().split('?')[0];
+      cuerpo += (cuerpo?'<br>':'') + (/\.(jpe?g|png|webp|gif)(\?|$)/i.test(m.archivo)
+        ? '<a target="_blank" href="'+armEsc(url)+'"><img src="'+armEsc(url)+'" style="max-width:160px;max-height:120px;border-radius:6px;display:block"></a>'
+        : '<a target="_blank" href="'+armEsc(url)+'">📎 '+armEsc(nombre)+'</a>');
+    }
+    return '<div style="display:flex;justify-content:'+(cliente?'flex-start':'flex-end')+';margin-bottom:6px">'
+      + '<div style="max-width:78%;background:'+(cliente?'#fff':(m.autor==='equipo'?'#D6E8FF':'#D9FDD3'))+';border-radius:8px;padding:6px 9px;font-size:13px;box-shadow:0 1px 1px rgba(0,0,0,0.08)">'
+        + (quien?'<div style="font-size:10px;color:#4A6741;font-weight:700;margin-bottom:2px">'+quien+'</div>':'')
+        + cuerpo
+        + '<div style="font-size:10px;color:#999;text-align:right;margin-top:2px">'+armFecha(m.creado)+'</div>'
+      + '</div></div>';
+  }).join('');
+  conv.scrollTop = conv.scrollHeight;
+}
+
+async function armCambiarEstado(chatId, estado){
+  const txt = estado==='claude'
+    ? '¿Devolver este chat al ARM? Va a volver a responder los próximos mensajes del cliente.'
+    : '¿Tomar este chat? El ARM deja de responder hasta que lo devuelvas.';
+  if(!confirm(txt)) return;
+  const cambios = estado==='claude'
+    ? { estado:'claude', derivado_motivo:null, actualizado:new Date().toISOString() }
+    : { estado:'equipo', derivado_motivo:'lo tomó el equipo desde el sistema', derivado_en:new Date().toISOString(), actualizado:new Date().toISOString() };
+  const { error } = await supa.from('arm_chats').update(cambios).eq('chat_id', chatId);
+  if(error){ alert('No se pudo cambiar: '+error.message); return; }
+  if (typeof mostrarToastGuardado==='function') mostrarToastGuardado(estado==='claude' ? 'Chat devuelto al ARM' : 'Chat tomado por el equipo');
+  await renderARM(true);
+}
+function armIrALead(leadId){
+  crmMostrarVista('leads');
+  if (typeof seleccionarLead==='function') seleccionarLead(leadId);
+}
+function armVerChat(chatId){
+  armChatSel = chatId;
+  crmMostrarVista('arm');
+}
+// Bloque chico dentro del detalle del lead: qué averiguó el ARM
+async function armBloqueLead(leadId, lead){
+  const cont = document.getElementById('crm-lead-arm');
+  if(!cont || !lead || !lead.telefono) return;
+  if(!armChats.length && !armCargando) await armCargar();
+  const c = armChatDeTelefono(lead.telefono);
+  if(!c || !document.getElementById('crm-lead-arm')) return;
+  const cal = ARM_CALIF[c.calificacion||'sin_datos'] || ARM_CALIF.sin_datos;
+  const d = c.datos || {};
+  cont.innerHTML = '<div style="background:#F4F8F2;border:1px solid #CFE0C8;border-radius:8px;padding:8px 12px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px">'
+    + '<b>🤖 ARM</b>'
+    + '<span style="background:'+cal.color+';color:#fff;padding:1px 8px;border-radius:8px">'+cal.label+'</span>'
+    + '<span>'+armEsc(c.producto||c.interes||'')+'</span>'
+    + (d.reunion ? '<span>📅 '+armDia(d.reunion.fecha)+' '+armEsc(d.reunion.hora)+'</span>' : '')
+    + '<span style="color:#888">'+(c.estado==='equipo'?'🙋 lo atiende el equipo':'🤖 lo atiende el ARM')+'</span>'
+    + '<span style="flex:1"></span>'
+    + '<button class="btn btn-outline btn-sm" onclick="armVerChat(\''+c.chat_id+'\')">💬 Ver conversación</button>'
+    + '</div>';
+}
+
 
 function navegarMesPlanner(delta){
   plannerMesActual.setMonth(plannerMesActual.getMonth() + delta);
@@ -3460,6 +3720,7 @@ function renderLeadDetalle(id){
       + '<button onclick="eliminarLead(\''+id+'\')" style="border:none;background:rgba(255,255,255,0.15);color:#fff;border-radius:4px;cursor:pointer;padding:3px 10px;font-size:12px">🗑 Eliminar lead</button>'
     + '</div>'
     + '<div class="card-body">'
+      + '<div id="crm-lead-arm" style="margin-bottom:10px"></div>'
       + '<div class="grid-4" style="gap:10px;margin-bottom:10px">'
         + '<div class="form-group" style="margin:0"><label class="form-label">Teléfono</label><input class="form-input" placeholder="Ej: 0981123456" value="'+(l.telefono||'').replace(/"/g,'&quot;')+'" onchange="setLeadCampo(\''+id+'\',\'telefono\',this.value)"></div>'
         + '<div class="form-group" style="margin:0"><label class="form-label">Ciudad</label><input class="form-input" value="'+(l.ciudad||'').replace(/"/g,'&quot;')+'" onchange="setLeadCampo(\''+id+'\',\'ciudad\',this.value)"></div>'
@@ -3495,6 +3756,7 @@ function renderLeadDetalle(id){
         + '<div>'+notasHtml+'</div>'
       + '</div>'
     + '</div></div>';
+  armBloqueLead(id, l);
 }
 
 function aplicarRolUsuario(email){
@@ -4808,6 +5070,10 @@ function repintarTabActivo(recargarMemoria){
   try{
     const pv = document.getElementById('crm-vista-planner');
     if(name==='crm' && pv && pv.style.display!=='none' && typeof renderPlanner==='function') renderPlanner();
+  }catch(e){}
+  try{
+    const av = document.getElementById('crm-vista-arm');
+    if(name==='crm' && av && av.style.display!=='none' && typeof renderARM==='function') renderARM(true);
   }catch(e){}
   return { tab: name, fallaron: fallaron };
 }
