@@ -1635,6 +1635,10 @@
 
       <div id="crm-vista-leads">
         <div id="crm-funnel" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
+        <details id="crm-resumen-det" open style="margin-bottom:14px;background:#F6F8F5;border-radius:8px;padding:8px 12px">
+          <summary style="cursor:pointer;font-weight:700;font-size:13px;color:#4A6741">📊 Leads por producto — cuántos entraron por cada uno y cuántos son realmente</summary>
+          <div id="crm-resumen-productos" style="margin-top:8px;overflow-x:auto"></div>
+        </details>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <input id="crm-buscar" class="form-input" placeholder="🔍 Buscar lead..." style="flex:1;min-width:200px" oninput="renderCRM()">
           <select id="crm-filtro-etapa" class="form-input" style="max-width:200px" onchange="renderCRM()">
@@ -1643,8 +1647,12 @@
           <select id="crm-filtro-linea" class="form-input" style="max-width:220px" onchange="document.getElementById('crm-filtro-producto').value='todos'; renderCRM()">
             <option value="todas">Todas las líneas</option>
           </select>
-          <select id="crm-filtro-producto" class="form-input" style="max-width:200px" onchange="renderCRM()">
+          <select id="crm-filtro-producto" class="form-input" style="max-width:220px" onchange="renderCRM()">
             <option value="todos">Todos los productos</option>
+          </select>
+          <select id="crm-filtro-modo" class="form-input" style="max-width:190px" onchange="document.getElementById('crm-filtro-producto').dataset.firma=''; renderCRM()" title="El producto que eligió en el formulario o el que realmente quiere">
+            <option value="actual">Producto real</option>
+            <option value="entro">Entró por</option>
           </select>
           <button class="btn btn-outline btn-sm" onclick="importarLeadsWeb()">🔄 Buscar leads nuevos</button>
           <button class="btn btn-primary btn-sm" onclick="nuevoLead()">+ Nuevo lead</button>
@@ -2589,6 +2597,10 @@ const LINEAS_CRM = [
   { id:'servicios', label:'📐 Servicios técnicos',           productos:['Planos municipales','Carpeta AFD','Proyecto Comercial','Carpeta para préstamo'] },
   { id:'otros',     label:'💬 Otros',                        productos:['Consulta general'] }
 ];
+// "Entró por": lo que eligió en el formulario (no cambia). Los leads viejos,
+// que nunca cambiaron de producto, entraron por el mismo que tienen.
+function entroPorCRM(l){ return (l && (l.interesInicial || l.interes)) || 'Consulta general'; }
+function productoCRM(l){ return (l && l.interes) || 'Consulta general'; }
 function lineaDeProductoCRM(producto){
   const l = LINEAS_CRM.find(function(x){ return x.productos.indexOf(producto) !== -1; });
   return l ? l.id : 'otros';
@@ -2910,6 +2922,8 @@ function setLeadCampo(id, campo, val){
   const leads = getCRM();
   if (!leads[id]) return;
   if (campo === 'etapa') registrarCambioEtapaLead(leads[id], id, val);
+  // El "entró por" no se pierde al corregir el producto
+  if (campo === 'interes' && !leads[id].interesInicial && leads[id].interes && leads[id].interes !== val) leads[id].interesInicial = leads[id].interes;
   leads[id][campo] = val;
   guardarCRM(leads);
   renderCRM();
@@ -3055,6 +3069,14 @@ function convertirEnCliente(id){
   alert('Listo — "'+l.nombre+'" ya está en Clientes.');
 }
 
+function crmFiltrarProducto(p){
+  const li = document.getElementById('crm-filtro-linea'), pr = document.getElementById('crm-filtro-producto'), mo = document.getElementById('crm-filtro-modo');
+  if (li) li.value = 'todas';
+  if (mo) mo.value = 'actual';
+  if (pr) { pr.dataset.firma = ''; }
+  renderCRM();
+  if (pr) { pr.value = p; renderCRM(); }
+}
 function filtrarPorEtapaCRM(etapaId){
   const sel = document.getElementById('crm-filtro-etapa');
   if (!sel) return;
@@ -3620,23 +3642,72 @@ function renderCRM(){
   const filtroEtapa = document.getElementById('crm-filtro-etapa')?.value || 'todas';
   const filtroLinea = document.getElementById('crm-filtro-linea')?.value || 'todas';
   const filtroProducto = document.getElementById('crm-filtro-producto')?.value || 'todos';
+  const modoProd = document.getElementById('crm-filtro-modo')?.value || 'actual';
+  const prodDe = modoProd === 'entro' ? entroPorCRM : productoCRM;
   const hoy = new Date().toISOString().split('T')[0];
 
   // Filtros de línea y producto (se arman una vez; el de producto según la línea)
   const selLinea = document.getElementById('crm-filtro-linea');
-  if (selLinea && selLinea.options.length <= 1) {
-    LINEAS_CRM.forEach(function(li){ const o=document.createElement('option'); o.value=li.id; o.textContent=li.label; selLinea.appendChild(o); });
-    selLinea.value = filtroLinea;
+  const todosLeads = Object.values(leads);
+  const cuenta = {};
+  todosLeads.forEach(function(l){ const p = prodDe(l); cuenta[p] = (cuenta[p]||0) + 1; });
+  if (selLinea) {
+    const optsLin = '<option value="todas">Todas las líneas ('+todosLeads.length+')</option>' + LINEAS_CRM.map(function(li){
+      const n = todosLeads.filter(function(l){ return lineaDeProductoCRM(prodDe(l))===li.id; }).length;
+      return '<option value="'+li.id+'">'+li.label+' ('+n+')</option>';
+    }).join('');
+    if (selLinea.dataset.html !== optsLin) { selLinea.innerHTML = optsLin; selLinea.dataset.html = optsLin; selLinea.value = filtroLinea; }
   }
   const selProd = document.getElementById('crm-filtro-producto');
   if (selProd) {
-    const prods = INTERESES_CRM.filter(function(p){ return filtroLinea==='todas' || lineaDeProductoCRM(p)===filtroLinea; });
-    const firma = filtroLinea + '|' + prods.join(',');
-    if (selProd.dataset.firma !== firma) {
-      selProd.innerHTML = '<option value="todos">Todos los productos</option>' + prods.map(function(p){ return '<option value="'+p.replace(/"/g,'&quot;')+'">'+p.replace(/</g,'&lt;')+'</option>'; }).join('');
-      selProd.dataset.firma = firma;
-      selProd.value = prods.indexOf(filtroProducto)!==-1 ? filtroProducto : 'todos';
+    const prods = INTERESES_CRM.slice();
+    Object.keys(cuenta).forEach(function(p){ if (prods.indexOf(p)===-1) prods.push(p); });
+    const visibles = prods.filter(function(p){ return filtroLinea==='todas' || lineaDeProductoCRM(p)===filtroLinea; });
+    const optsProd = '<option value="todos">Todos los productos</option>' + visibles.map(function(p){ return '<option value="'+p.replace(/"/g,'&quot;')+'">'+p.replace(/</g,'&lt;')+' ('+(cuenta[p]||0)+')</option>'; }).join('');
+    if (selProd.dataset.firma !== optsProd) {
+      selProd.innerHTML = optsProd;
+      selProd.dataset.firma = optsProd;
+      selProd.value = visibles.indexOf(filtroProducto)!==-1 ? filtroProducto : 'todos';
     }
+  }
+
+  // Resumen: entraron por / son realmente, y cómo van
+  const resumenCont = document.getElementById('crm-resumen-productos');
+  if (resumenCont) {
+    const prodsTodos = INTERESES_CRM.slice();
+    todosLeads.forEach(function(l){ [entroPorCRM(l), productoCRM(l)].forEach(function(p){ if (prodsTodos.indexOf(p)===-1) prodsTodos.push(p); }); });
+    const avanzadas = ['visita','reuniones','a_presupuestar','presupuestado','ganado'];
+    const th = 'style="text-align:right;padding:4px 8px;font-size:11px;color:#666;white-space:nowrap"';
+    const td = 'style="text-align:right;padding:4px 8px;font-size:12px"';
+    let filas = '';
+    LINEAS_CRM.forEach(function(li){
+      const deLinea = prodsTodos.filter(function(p){ return lineaDeProductoCRM(p)===li.id; });
+      const filasLinea = deLinea.map(function(p){
+        const entraron = todosLeads.filter(function(l){ return entroPorCRM(l)===p; }).length;
+        const reales = todosLeads.filter(function(l){ return productoCRM(l)===p; });
+        if (!entraron && !reales.length) return '';
+        const vinieronDeOtro = reales.filter(function(l){ return entroPorCRM(l)!==p; }).length;
+        const seFueron = todosLeads.filter(function(l){ return entroPorCRM(l)===p && productoCRM(l)!==p; }).length;
+        const n = function(f){ return reales.filter(f).length; };
+        return '<tr style="border-top:1px solid #e5e5e5">'
+          + '<td style="padding:4px 8px;font-size:12px"><a href="#" onclick="crmFiltrarProducto(\''+p.replace(/'/g,"\\'")+'\');return false" style="color:#333">'+p.replace(/</g,'&lt;')+'</a></td>'
+          + '<td '+td+'><b>'+entraron+'</b></td>'
+          + '<td '+td+'><b>'+reales.length+'</b></td>'
+          + '<td '+td+' title="Entraron por otro producto y en realidad son este">'+(vinieronDeOtro?'+'+vinieronDeOtro:'')+'</td>'
+          + '<td '+td+' title="Entraron por este producto y en realidad son otro">'+(seFueron?'−'+seFueron:'')+'</td>'
+          + '<td '+td+'>'+(n(function(l){ return l.calificacion==='caliente'; })||'')+'</td>'
+          + '<td '+td+'>'+(n(function(l){ return avanzadas.indexOf(l.etapa)!==-1; })||'')+'</td>'
+          + '<td '+td+'>'+(n(function(l){ return l.etapa==='presupuestado'; })||'')+'</td>'
+          + '<td '+td+'>'+(n(function(l){ return l.etapa==='ganado'; })||'')+'</td>'
+          + '<td '+td+'>'+(n(function(l){ return l.etapa==='perdido'; })||'')+'</td>'
+          + '</tr>';
+      }).join('');
+      if (filasLinea) filas += '<tr><td colspan="10" style="padding:8px 8px 2px;font-size:11px;font-weight:700;color:#4A6741">'+li.label+'</td></tr>' + filasLinea;
+    });
+    resumenCont.innerHTML = '<table style="border-collapse:collapse;min-width:640px;width:100%;background:#fff;border-radius:6px">'
+      + '<tr><th style="text-align:left;padding:4px 8px;font-size:11px;color:#666">Producto</th><th '+th+'>Entraron por</th><th '+th+'>Son realmente</th><th '+th+'>Vinieron de otro</th><th '+th+'>Se pasaron a otro</th><th '+th+'>🔥 Calientes</th><th '+th+'>Visita / reunión o más</th><th '+th+'>Presupuestados</th><th '+th+'>Ganados</th><th '+th+'>Perdidos</th></tr>'
+      + filas + '</table>'
+      + '<div style="font-size:11px;color:#888;margin-top:6px">"Entraron por" es lo que eligieron en el formulario. "Son realmente" es el producto corregido por el ARM o por ustedes. Las columnas de etapas cuentan sobre "Son realmente". Tocá un producto para ver sus leads.</div>';
   }
 
   // Select de filtro: se completa dinámicamente desde ETAPAS_CRM
@@ -3667,8 +3738,8 @@ function renderCRM(){
   if (q) entradas = entradas.filter(l => (l.nombre||'').toLowerCase().includes(q));
   if (filtroEtapa==='para_atender') entradas = entradas.filter(l => l.paraAtender);
   else if (filtroEtapa!=='todas') entradas = entradas.filter(l => l.etapa===filtroEtapa);
-  if (filtroLinea!=='todas') entradas = entradas.filter(l => lineaDeProductoCRM(l.interes||'Consulta general')===filtroLinea);
-  if (filtroProducto!=='todos') entradas = entradas.filter(l => (l.interes||'Consulta general')===filtroProducto);
+  if (filtroLinea!=='todas') entradas = entradas.filter(l => lineaDeProductoCRM(prodDe(l))===filtroLinea);
+  if (filtroProducto!=='todos') entradas = entradas.filter(l => prodDe(l)===filtroProducto);
   // Orden: por fecha de entrada a la etapa actual, los más antiguos arriba
   // (los que llevan más tiempo esperando). Sin fecha → al final. Empate → nombre.
   entradas.forEach(l=>{ l._fEtapa = fechaEntradaEtapaLead(l, l.id); l._tEtapa = _tsHistLead(l._fEtapa); });
@@ -3704,7 +3775,7 @@ function renderCRM(){
       if (l.paraAtender) badge = '<span title="'+String(l.paraAtender.motivo||'').replace(/"/g,'&quot;')+'" style="background:#1565C0;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;margin-left:6px">🙋 Para atender</span>' + badge;
       return '<div onclick="seleccionarLead(\''+l.id+'\')" style="cursor:pointer;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:'+(activo?'#E8F0E5':'#fff')+';border:1px solid '+(activo?'#4A6741':(frio?'#C00':'#eee'))+'">'
         + '<div style="font-weight:700;font-size:13px;color:#333">'+l.nombre+badge+'</div>'
-        + '<div style="font-size:11px;color:#888;margin-top:2px"><span style="background:'+et.color+';color:#fff;padding:1px 7px;border-radius:8px">'+et.label+'</span>'+' · '+(l.interes||'Consulta general').replace(/</g,'&lt;')+(l.origen?' · '+l.origen:'')+(l.telefono?' · '+l.telefono:'')+(l.creadoEn?' · ingresó '+formatFechaHoraLead(l.creadoEn):'')+'</div>'
+        + '<div style="font-size:11px;color:#888;margin-top:2px"><span style="background:'+et.color+';color:#fff;padding:1px 7px;border-radius:8px">'+et.label+'</span>'+' · '+productoCRM(l).replace(/</g,'&lt;')+(entroPorCRM(l)!==productoCRM(l)?' <span style="color:#aaa">(entró por '+entroPorCRM(l).replace(/</g,'&lt;')+')</span>':'')+(l.origen?' · '+l.origen:'')+(l.telefono?' · '+l.telefono:'')+(l.creadoEn?' · ingresó '+formatFechaHoraLead(l.creadoEn):'')+'</div>'
         + (l._fEtapa ? '<div style="font-size:11px;color:#4A6741;margin-top:3px">📍 En esta etapa desde '+_fechaCortaHistLead(l._fEtapa)+(function(){ const d=_diasEntreHistLead(l._fEtapa); return d===null?'':' · '+d+' día(s)'; })()+'</div>' : '')
         + '</div>';
     }).join('');
@@ -3786,7 +3857,7 @@ function renderLeadDetalle(id){
         + '<div class="form-group" style="margin:0"><label class="form-label">Etapa</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'etapa\',this.value)">'+etapaOpts+'</select></div>'
       + '</div>'
       + '<div class="grid-4" style="gap:10px;margin-bottom:16px">'
-        + '<div class="form-group" style="margin:0"><label class="form-label">Producto</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'interes\',this.value)">'+interesOpts+'</select></div>'
+        + '<div class="form-group" style="margin:0"><label class="form-label">Producto'+(entroPorCRM(l)!==productoCRM(l)?' <span style="font-weight:400;color:#888">(entró por '+entroPorCRM(l).replace(/</g,'&lt;')+')</span>':'')+'</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'interes\',this.value)">'+interesOpts+'</select></div>'
         + '<div class="form-group" style="margin:0;grid-column:span 2"><label class="form-label">Mensaje (editable, se guarda para todos los leads de este interés)</label><textarea class="form-input" style="font-size:12px;min-height:44px" onchange="guardarPlantillaCRM(\''+interesActual.replace(/'/g,"\\'")+'\', this.value); renderLeadDetalle(\''+id+'\')">'+mensajePlantilla.replace(/</g,'&lt;')+'</textarea></div>'
         + '<div class="form-group" style="margin:0"><label class="form-label">&nbsp;</label>'+waBtn+'</div>'
       + '</div>'
