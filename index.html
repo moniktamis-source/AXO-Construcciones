@@ -1640,6 +1640,12 @@
           <select id="crm-filtro-etapa" class="form-input" style="max-width:200px" onchange="renderCRM()">
             <option value="todas">Todas las etapas</option>
           </select>
+          <select id="crm-filtro-linea" class="form-input" style="max-width:220px" onchange="document.getElementById('crm-filtro-producto').value='todos'; renderCRM()">
+            <option value="todas">Todas las líneas</option>
+          </select>
+          <select id="crm-filtro-producto" class="form-input" style="max-width:200px" onchange="renderCRM()">
+            <option value="todos">Todos los productos</option>
+          </select>
           <button class="btn btn-outline btn-sm" onclick="importarLeadsWeb()">🔄 Buscar leads nuevos</button>
           <button class="btn btn-primary btn-sm" onclick="nuevoLead()">+ Nuevo lead</button>
         </div>
@@ -2573,6 +2579,21 @@ const PLANTILLAS_DEFAULT = {
 // (26/09/2026: se suman Quincho + Piscina y Casa Quinta)
 // (10/10/2026: se suman Casa de una planta, Casa de dos plantas, Baño y Cocina)
 const INTERESES_CRM = ['Planos municipales','Construcción/Refacción','Proyecto residencial','Proyecto Comercial','Carpeta AFD','Quincho + Piscina','Casa Quinta','Casa de una planta','Casa de dos plantas','Baño','Cocina','Consulta general'];
+// 21/11/2026 — El "Interés" pasa a llamarse "Producto" (lo corrige el ARM según
+// la charla). Se suman Construcción y Refacción por separado, que usa el ARM.
+['Construcción','Refacción'].forEach(function(p){ if (INTERESES_CRM.indexOf(p)===-1) INTERESES_CRM.splice(INTERESES_CRM.indexOf('Consulta general'), 0, p); });
+// Líneas de negocio (guion del ARM, sección 5): agrupan los productos.
+const LINEAS_CRM = [
+  { id:'vivienda',  label:'🏠 Vivienda desde cero',          productos:['Casa de una planta','Casa de dos plantas','Casa Quinta','Proyecto residencial'] },
+  { id:'refaccion', label:'🔧 Refacciones e intervenciones', productos:['Baño','Cocina','Quincho + Piscina','Construcción','Refacción','Construcción/Refacción'] },
+  { id:'servicios', label:'📐 Servicios técnicos',           productos:['Planos municipales','Carpeta AFD','Proyecto Comercial','Carpeta para préstamo'] },
+  { id:'otros',     label:'💬 Otros',                        productos:['Consulta general'] }
+];
+function lineaDeProductoCRM(producto){
+  const l = LINEAS_CRM.find(function(x){ return x.productos.indexOf(producto) !== -1; });
+  return l ? l.id : 'otros';
+}
+const CALIF_CRM = { caliente:{ label:'🔥 Caliente', color:'#C62828' }, tibio:{ label:'🌤 Tibio', color:'#E65100' }, no_califica:{ label:'✖ No califica', color:'#757575' } };
 
 // Opciones del selector de interés: la lista oficial y, si el lead trae un
 // interés que no está en ella (ej. 'Construcción' o 'Refacción' de leads viejos),
@@ -2877,6 +2898,14 @@ function eliminarLead(id){
   renderCRM();
 }
 function seleccionarLead(id){ leadSeleccionado = id; renderCRM(); }
+// Saca la marca "Para atender" que deja el ARM al derivar un chat.
+function marcarLeadAtendido(id){
+  const leads = getCRM();
+  if (!leads[id] || !leads[id].paraAtender) return;
+  delete leads[id].paraAtender;
+  guardarCRM(leads);
+  renderCRM();
+}
 function setLeadCampo(id, campo, val){
   const leads = getCRM();
   if (!leads[id]) return;
@@ -3210,7 +3239,9 @@ async function armRenderDetalle(chatId){
   const d = c.datos || {};
   const cal = ARM_CALIF[c.calificacion||'sin_datos'] || ARM_CALIF.sin_datos;
   const fila = function(label, val){ return val ? '<div style="font-size:12px;margin-bottom:4px"><span style="color:#888">'+label+':</span> '+val+'</div>' : ''; };
-  const lead = Object.entries(getCRM()).find(function(e){ return armTel(e[1].telefono)===chatId; });
+  // Si el número tiene varios leads, el más reciente
+  const lead = Object.entries(getCRM()).filter(function(e){ return armTel(e[1].telefono)===chatId; })
+    .sort(function(a,b){ return String(b[1].creadoEn||'').localeCompare(String(a[1].creadoEn||'')); })[0];
 
   const botones = (c.estado==='equipo'
       ? '<button class="btn btn-primary btn-sm" onclick="armCambiarEstado(\''+chatId+'\',\'claude\')" title="El ARM vuelve a responder este chat">🤖 Devolver a Claude</button>'
@@ -3587,11 +3618,31 @@ function renderCRM(){
   const leads = getCRM();
   const q = (document.getElementById('crm-buscar')?.value||'').trim().toLowerCase();
   const filtroEtapa = document.getElementById('crm-filtro-etapa')?.value || 'todas';
+  const filtroLinea = document.getElementById('crm-filtro-linea')?.value || 'todas';
+  const filtroProducto = document.getElementById('crm-filtro-producto')?.value || 'todos';
   const hoy = new Date().toISOString().split('T')[0];
+
+  // Filtros de línea y producto (se arman una vez; el de producto según la línea)
+  const selLinea = document.getElementById('crm-filtro-linea');
+  if (selLinea && selLinea.options.length <= 1) {
+    LINEAS_CRM.forEach(function(li){ const o=document.createElement('option'); o.value=li.id; o.textContent=li.label; selLinea.appendChild(o); });
+    selLinea.value = filtroLinea;
+  }
+  const selProd = document.getElementById('crm-filtro-producto');
+  if (selProd) {
+    const prods = INTERESES_CRM.filter(function(p){ return filtroLinea==='todas' || lineaDeProductoCRM(p)===filtroLinea; });
+    const firma = filtroLinea + '|' + prods.join(',');
+    if (selProd.dataset.firma !== firma) {
+      selProd.innerHTML = '<option value="todos">Todos los productos</option>' + prods.map(function(p){ return '<option value="'+p.replace(/"/g,'&quot;')+'">'+p.replace(/</g,'&lt;')+'</option>'; }).join('');
+      selProd.dataset.firma = firma;
+      selProd.value = prods.indexOf(filtroProducto)!==-1 ? filtroProducto : 'todos';
+    }
+  }
 
   // Select de filtro: se completa dinámicamente desde ETAPAS_CRM
   const selEtapa = document.getElementById('crm-filtro-etapa');
   if (selEtapa && selEtapa.options.length <= 1) {
+    { const o = document.createElement('option'); o.value = 'para_atender'; o.textContent = '🙋 Para atender'; selEtapa.appendChild(o); }
     ETAPAS_CRM.forEach(et=>{
       const opt = document.createElement('option');
       opt.value = et.id; opt.textContent = et.label;
@@ -3604,7 +3655,8 @@ function renderCRM(){
   const funnelCont = document.getElementById('crm-funnel');
   if (funnelCont) {
     const todos = Object.values(leads);
-    funnelCont.innerHTML = ETAPAS_CRM.map(et=>{
+    const nAtender = todos.filter(l=>l.paraAtender).length;
+    funnelCont.innerHTML = (nAtender ? '<div onclick="filtrarPorEtapaCRM(\'para_atender\')" title="Chats que el ARM pasó al equipo" style="cursor:pointer;background:#1565C0;color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;'+(filtroEtapa==='para_atender'?'box-shadow:0 0 0 2px #222 inset;':'')+'">🙋 Para atender: '+nAtender+'</div>' : '') + ETAPAS_CRM.map(et=>{
       const n = todos.filter(l=>l.etapa===et.id).length;
       const activo = filtroEtapa===et.id;
       return '<div onclick="filtrarPorEtapaCRM(\''+et.id+'\')" style="cursor:pointer;background:'+et.color+';color:#fff;border-radius:8px;padding:6px 12px;font-size:12px;font-weight:600;'+(activo?'box-shadow:0 0 0 2px #222 inset;':'')+'">'+et.label+': '+n+'</div>';
@@ -3613,7 +3665,10 @@ function renderCRM(){
 
   let entradas = Object.entries(leads).map(([id,l])=>({id,...l}));
   if (q) entradas = entradas.filter(l => (l.nombre||'').toLowerCase().includes(q));
-  if (filtroEtapa!=='todas') entradas = entradas.filter(l => l.etapa===filtroEtapa);
+  if (filtroEtapa==='para_atender') entradas = entradas.filter(l => l.paraAtender);
+  else if (filtroEtapa!=='todas') entradas = entradas.filter(l => l.etapa===filtroEtapa);
+  if (filtroLinea!=='todas') entradas = entradas.filter(l => lineaDeProductoCRM(l.interes||'Consulta general')===filtroLinea);
+  if (filtroProducto!=='todos') entradas = entradas.filter(l => (l.interes||'Consulta general')===filtroProducto);
   // Orden: por fecha de entrada a la etapa actual, los más antiguos arriba
   // (los que llevan más tiempo esperando). Sin fecha → al final. Empate → nombre.
   entradas.forEach(l=>{ l._fEtapa = fechaEntradaEtapaLead(l, l.id); l._tEtapa = _tsHistLead(l._fEtapa); });
@@ -3624,7 +3679,7 @@ function renderCRM(){
   });
 
   if (!entradas.length) {
-    contLista.innerHTML = '<div class="alert alert-warn">'+(q||filtroEtapa!=='todas' ? 'Ningún lead coincide con el filtro.' : 'Todavía no cargaste ningún lead. Tocá "+ Nuevo lead" para empezar.')+'</div>';
+    contLista.innerHTML = '<div class="alert alert-warn">'+(q||filtroEtapa!=='todas'||filtroLinea!=='todas'||filtroProducto!=='todos' ? 'Ningún lead coincide con el filtro.' : 'Todavía no cargaste ningún lead. Tocá "+ Nuevo lead" para empezar.')+'</div>';
   } else {
     contLista.innerHTML = entradas.map(l=>{
       const activo = l.id===leadSeleccionado;
@@ -3645,9 +3700,11 @@ function renderCRM(){
           if (horasDesde > 48) { frio = true; badge += '<span title="Sin actividad hace más de 48hs" style="background:#C00;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;margin-left:6px">⏰ frío</span>'; }
         }
       }
+      if (l.calificacion && CALIF_CRM[l.calificacion]) badge = '<span style="background:'+CALIF_CRM[l.calificacion].color+';color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;margin-left:6px">'+CALIF_CRM[l.calificacion].label+'</span>' + badge;
+      if (l.paraAtender) badge = '<span title="'+String(l.paraAtender.motivo||'').replace(/"/g,'&quot;')+'" style="background:#1565C0;color:#fff;font-size:10px;padding:1px 7px;border-radius:10px;margin-left:6px">🙋 Para atender</span>' + badge;
       return '<div onclick="seleccionarLead(\''+l.id+'\')" style="cursor:pointer;padding:10px 12px;border-radius:8px;margin-bottom:6px;background:'+(activo?'#E8F0E5':'#fff')+';border:1px solid '+(activo?'#4A6741':(frio?'#C00':'#eee'))+'">'
         + '<div style="font-weight:700;font-size:13px;color:#333">'+l.nombre+badge+'</div>'
-        + '<div style="font-size:11px;color:#888;margin-top:2px"><span style="background:'+et.color+';color:#fff;padding:1px 7px;border-radius:8px">'+et.label+'</span>'+(l.origen?' · '+l.origen:'')+(l.telefono?' · '+l.telefono:'')+(l.creadoEn?' · ingresó '+formatFechaHoraLead(l.creadoEn):'')+'</div>'
+        + '<div style="font-size:11px;color:#888;margin-top:2px"><span style="background:'+et.color+';color:#fff;padding:1px 7px;border-radius:8px">'+et.label+'</span>'+' · '+(l.interes||'Consulta general').replace(/</g,'&lt;')+(l.origen?' · '+l.origen:'')+(l.telefono?' · '+l.telefono:'')+(l.creadoEn?' · ingresó '+formatFechaHoraLead(l.creadoEn):'')+'</div>'
         + (l._fEtapa ? '<div style="font-size:11px;color:#4A6741;margin-top:3px">📍 En esta etapa desde '+_fechaCortaHistLead(l._fEtapa)+(function(){ const d=_diasEntreHistLead(l._fEtapa); return d===null?'':' · '+d+' día(s)'; })()+'</div>' : '')
         + '</div>';
     }).join('');
@@ -3668,7 +3725,7 @@ function renderLeadDetalle(id){
   // "Privyr" ya no se ofrece como opción para leads nuevos (herramienta reemplazada
   // por Supabase+Telegram), pero si un lead viejo ya la tiene cargada, la dejamos
   // visible y seleccionada para no perder ese dato histórico.
-  const origenesBase = ['Meta Ads','Referido','Web','Boca en boca','Otro'];
+  const origenesBase = ['Meta Ads','Referido','Web','WhatsApp directo','Boca en boca','Otro'];
   const origenesDisponibles = (l.origen === 'Privyr' && !origenesBase.includes('Privyr')) ? ['Privyr', ...origenesBase] : origenesBase;
   const origenOpts = origenesDisponibles.map(o=>'<option value="'+o+'" '+(l.origen===o?'selected':'')+'>'+o+'</option>').join('');
   const plantillas = getPlantillasCRM();
@@ -3720,6 +3777,7 @@ function renderLeadDetalle(id){
       + '<button onclick="eliminarLead(\''+id+'\')" style="border:none;background:rgba(255,255,255,0.15);color:#fff;border-radius:4px;cursor:pointer;padding:3px 10px;font-size:12px">🗑 Eliminar lead</button>'
     + '</div>'
     + '<div class="card-body">'
+      + (l.paraAtender ? '<div style="background:#E3F0FF;border:1px solid #90CAF9;border-radius:8px;padding:8px 12px;margin-bottom:10px;display:flex;gap:10px;align-items:center;flex-wrap:wrap;font-size:12px"><b>🙋 Para atender</b><span>'+String(l.paraAtender.motivo||'').replace(/</g,'&lt;')+(l.paraAtender.fecha?' · '+formatFechaHoraLead(l.paraAtender.fecha):'')+'</span><span style="flex:1"></span><button class="btn btn-primary btn-sm" onclick="marcarLeadAtendido(\''+id+'\')">✓ Ya lo atendí</button></div>' : '')
       + '<div id="crm-lead-arm" style="margin-bottom:10px"></div>'
       + '<div class="grid-4" style="gap:10px;margin-bottom:10px">'
         + '<div class="form-group" style="margin:0"><label class="form-label">Teléfono</label><input class="form-input" placeholder="Ej: 0981123456" value="'+(l.telefono||'').replace(/"/g,'&quot;')+'" onchange="setLeadCampo(\''+id+'\',\'telefono\',this.value)"></div>'
@@ -3728,7 +3786,7 @@ function renderLeadDetalle(id){
         + '<div class="form-group" style="margin:0"><label class="form-label">Etapa</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'etapa\',this.value)">'+etapaOpts+'</select></div>'
       + '</div>'
       + '<div class="grid-4" style="gap:10px;margin-bottom:16px">'
-        + '<div class="form-group" style="margin:0"><label class="form-label">Interés (primer mensaje)</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'interes\',this.value)">'+interesOpts+'</select></div>'
+        + '<div class="form-group" style="margin:0"><label class="form-label">Producto</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'interes\',this.value)">'+interesOpts+'</select></div>'
         + '<div class="form-group" style="margin:0;grid-column:span 2"><label class="form-label">Mensaje (editable, se guarda para todos los leads de este interés)</label><textarea class="form-input" style="font-size:12px;min-height:44px" onchange="guardarPlantillaCRM(\''+interesActual.replace(/'/g,"\\'")+'\', this.value); renderLeadDetalle(\''+id+'\')">'+mensajePlantilla.replace(/</g,'&lt;')+'</textarea></div>'
         + '<div class="form-group" style="margin:0"><label class="form-label">&nbsp;</label>'+waBtn+'</div>'
       + '</div>'
