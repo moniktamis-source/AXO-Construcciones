@@ -3011,10 +3011,24 @@ function filtrarPorEtapaCRM(etapaId){
 let plannerMesActual = (() => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d; })();
 let plannerDiaSel = null; // 'YYYY-MM-DD'
 
-function getPlannerEventos(){ try{ return JSON.parse(localStorage.getItem('axo_crm_planner')||'[]'); }catch(e){ return []; } }
+// El Planner se guarda como objeto { id: evento } (un registro por evento, ver
+// axoMigrarPlannerAObjeto). Hacia afuera se sigue usando como lista.
+function getPlannerEventos(){
+  try{
+    const v = JSON.parse(localStorage.getItem('axo_crm_planner')||'{}');
+    if(Array.isArray(v)) return v; // formato viejo, por si la migracion no corrio
+    return Object.keys(v||{}).map(function(k){ return v[k]; }).filter(function(e){ return e && typeof e === 'object'; });
+  }catch(e){ return []; }
+}
 function guardarPlannerEventos(arr){
   try{
-    localStorage.setItem('axo_crm_planner', JSON.stringify(arr));
+    const obj = {};
+    (arr||[]).forEach(function(ev){
+      if(!ev || typeof ev !== 'object') return;
+      if(!ev.id) ev.id = 'plan_' + Date.now() + '_' + Math.random().toString(36).slice(2,6);
+      obj[ev.id] = ev;
+    });
+    localStorage.setItem('axo_crm_planner', JSON.stringify(obj));
     registrarActividad('Actualizado: Planner', '');
     if (typeof mostrarToastGuardado==='function') mostrarToastGuardado('Guardado');
     return true;
@@ -3910,7 +3924,33 @@ async function axoSubirBanco(){
   }catch(e){ console.warn('subirNube banco', e); return false; }
 }
 
-const AXO_MODULOS_REGISTRO = ['axo_proyectos','axo_crm','axo_clientes','axo_proveedores','axo_relevamientos','axo_especificaciones','axo_gabinete','axo_plantillas'];
+const AXO_MODULOS_REGISTRO = ['axo_proyectos','axo_crm','axo_clientes','axo_proveedores','axo_relevamientos','axo_especificaciones','axo_gabinete','axo_plantillas','axo_crm_planner'];
+
+// ── PLANNER POR REGISTRO (21/11/2026) ─────────────────────────────────
+// Hasta hoy el Planner era UN bloque (un array con todos los eventos). Si el
+// ARM (asistente de WhatsApp) agendaba una reunion desde el servidor mientras
+// alguien tenia el sistema abierto, el proximo guardado del navegador pisaba
+// ese evento. Ahora cada evento es su propia fila en axo_registros, como los
+// leads del CRM. Esta migracion convierte una sola vez el array viejo guardado
+// en el equipo a un objeto { id: evento }. Corre antes de instalar el
+// interceptor de subida (que esta al final del archivo), asi que no dispara
+// ninguna subida por si misma.
+(function axoMigrarPlannerAObjeto(){
+  try{
+    const raw = localStorage.getItem('axo_crm_planner');
+    if(!raw) return;
+    const v = JSON.parse(raw);
+    if(!Array.isArray(v)) return;
+    const obj = {};
+    v.forEach(function(ev, i){
+      if(!ev || typeof ev !== 'object') return;
+      if(!ev.id) ev.id = 'plan_mig_' + i + '_' + Date.now();
+      obj[ev.id] = ev;
+    });
+    localStorage.setItem('axo_crm_planner', JSON.stringify(obj));
+    console.info('[planner] migrado a registros:', Object.keys(obj).length, 'evento(s)');
+  }catch(e){ console.warn('[planner] no se pudo migrar el formato viejo', e); }
+})();
 function axoEsModuloRegistro(clave){ return AXO_MODULOS_REGISTRO.indexOf(clave) !== -1; }
 
 // ═══════════════════════════════════════════════════════════════════════
