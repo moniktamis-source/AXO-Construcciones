@@ -3077,6 +3077,15 @@ function crmFiltrarProducto(p){
   renderCRM();
   if (pr) { pr.value = p; renderCRM(); }
 }
+const MOTIVOS_PERDIDA_CRM = ['Precio','Depende de crédito','Para más adelante','Eligió a otro','No respondió','Fuera de zona','Otro'];
+function setMotivoPerdidaDetalle(id, detalle){
+  const leads = getCRM();
+  if (!leads[id]) return;
+  const base = String(leads[id].motivoPerdida||'').split(':')[0];
+  if (!base) return;
+  leads[id].motivoPerdida = detalle && detalle.trim() ? base + ': ' + detalle.trim() : base;
+  guardarCRM(leads);
+}
 function filtrarPorEtapaCRM(etapaId){
   const sel = document.getElementById('crm-filtro-etapa');
   if (!sel) return;
@@ -3707,6 +3716,13 @@ function renderCRM(){
     resumenCont.innerHTML = '<table style="border-collapse:collapse;min-width:640px;width:100%;background:#fff;border-radius:6px">'
       + '<tr><th style="text-align:left;padding:4px 8px;font-size:11px;color:#666">Producto</th><th '+th+'>Entraron por</th><th '+th+'>Son realmente</th><th '+th+'>Vinieron de otro</th><th '+th+'>Se pasaron a otro</th><th '+th+'>🔥 Calientes</th><th '+th+'>Visita / reunión o más</th><th '+th+'>Presupuestados</th><th '+th+'>Ganados</th><th '+th+'>Perdidos</th></tr>'
       + filas + '</table>'
+      + (function(){
+          const perd = todosLeads.filter(function(l){ return l.etapa==='perdido'; });
+          if (!perd.length) return '';
+          const c = {};
+          perd.forEach(function(l){ const m = String(l.motivoPerdida||'').split(':')[0]; const k = MOTIVOS_PERDIDA_CRM.indexOf(m)!==-1 ? m : 'Sin motivo de la lista'; c[k]=(c[k]||0)+1; });
+          return '<div style="font-size:12px;margin-top:8px"><b>❌ Motivos de pérdida:</b> ' + Object.keys(c).sort(function(a,b){ return c[b]-c[a]; }).map(function(k){ return k+' '+c[k]; }).join(' · ') + '</div>';
+        })()
       + '<div style="font-size:11px;color:#888;margin-top:6px">"Entraron por" es lo que eligieron en el formulario. "Son realmente" es el producto corregido por el ARM o por ustedes. Las columnas de etapas cuentan sobre "Son realmente". Tocá un producto para ver sus leads.</div>';
   }
 
@@ -3819,8 +3835,20 @@ function renderLeadDetalle(id){
     : '<span style="font-size:11px;color:#999">Cargá un teléfono para habilitar WhatsApp</span>';
 
 
+  // 21/11/2026 — Motivo de pérdida de una lista fija (guion del ARM, sección 9),
+  // así se pueden contar. Un motivo viejo escrito a mano se sigue mostrando.
+  const mp = l.motivoPerdida || '';
+  const mpBase = mp.split(':')[0];
+  const mpEnLista = MOTIVOS_PERDIDA_CRM.indexOf(mpBase) !== -1;
+  const mpOpts = '<option value="">— Elegí el motivo —</option>'
+    + MOTIVOS_PERDIDA_CRM.map(function(m){ return '<option value="'+m+'" '+(mpBase===m?'selected':'')+'>'+m+'</option>'; }).join('')
+    + (mp && !mpEnLista ? '<option value="'+mp.replace(/"/g,'&quot;')+'" selected>'+mp.replace(/</g,'&lt;')+' (anterior)</option>' : '');
+  const mpDetalle = mp.indexOf(':') !== -1 ? mp.slice(mp.indexOf(':')+1).trim() : '';
   const perdidaHtml = l.etapa==='perdido'
-    ? '<div class="form-group" style="margin:0 0 16px 0"><label class="form-label">Motivo de pérdida</label><input class="form-input" value="'+(l.motivoPerdida||'').replace(/"/g,'&quot;')+'" placeholder="Precio, plazos, eligió otra constructora..." onchange="setLeadCampo(\''+id+'\',\'motivoPerdida\',this.value)"></div>'
+    ? '<div class="grid-4" style="gap:10px;margin:0 0 16px 0">'
+      + '<div class="form-group" style="margin:0"><label class="form-label">Motivo de pérdida</label><select class="form-select" onchange="setLeadCampo(\''+id+'\',\'motivoPerdida\',this.value)">'+mpOpts+'</select></div>'
+      + '<div class="form-group" style="margin:0;grid-column:span 3"><label class="form-label">Detalle (opcional)</label><input class="form-input" value="'+mpDetalle.replace(/"/g,'&quot;')+'" placeholder="Ej: eligió otra constructora más barata" onchange="setMotivoPerdidaDetalle(\''+id+'\',this.value)"'+(mpEnLista?'':' disabled')+'></div>'
+      + '</div>'
     : '';
 
   const etapasSeguimiento = { seguimiento1:'Seguimiento 1', seguimiento2:'Seguimiento 2', ultimo_seg:'Último seguimiento' };
