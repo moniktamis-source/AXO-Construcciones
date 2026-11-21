@@ -1672,12 +1672,12 @@
         <div id="arm-resumen" style="display:flex;gap:8px;flex-wrap:wrap;margin-bottom:14px"></div>
         <div style="display:flex;gap:10px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
           <input id="arm-buscar" class="form-input" placeholder="🔍 Buscar por nombre, número, producto o ciudad..." style="flex:1;min-width:200px" oninput="renderARM(false)">
-          <select id="arm-filtro-estado" class="form-input" style="max-width:190px" onchange="renderARM(false)">
+          <select id="arm-filtro-estado" class="form-input" style="max-width:190px" onchange="armSoloCitas=false;renderARM(false)">
             <option value="todos">Todos los chats</option>
             <option value="claude">🤖 Los atiende el ARM</option>
             <option value="equipo">🙋 Los atiende el equipo</option>
           </select>
-          <select id="arm-filtro-calif" class="form-input" style="max-width:170px" onchange="renderARM(false)">
+          <select id="arm-filtro-calif" class="form-input" style="max-width:170px" onchange="armSoloCitas=false;renderARM(false)">
             <option value="todas">Toda calificación</option>
             <option value="caliente">🔥 Caliente</option>
             <option value="tibio">🌤 Tibio</option>
@@ -3153,7 +3153,7 @@ function crmMostrarVista(vista){
 // función arm-whatsapp). No se guarda nada en el equipo: siempre se consulta
 // la nube, así todas ven lo mismo.
 // ════════════════════════════════════════════════════════
-let armChats = [], armConfig = {}, armChatSel = null, armCargando = false;
+let armChats = [], armConfig = {}, armChatSel = null, armCargando = false, armSoloCitas = false;
 const ARM_CALIF = {
   caliente:    { label:'🔥 Caliente',  color:'#C62828' },
   tibio:       { label:'🌤 Tibio',     color:'#E65100' },
@@ -3226,13 +3226,14 @@ async function renderARM(recargar){
       + caja('🔥 Calientes', n(function(c){return c.calificacion==='caliente';}), '#C62828', "armFiltrar('todos','caliente')")
       + caja('🌤 Tibios', n(function(c){return c.calificacion==='tibio';}), '#E65100', "armFiltrar('todos','tibio')")
       + caja('🙋 Con el equipo', n(function(c){return c.estado==='equipo';}), '#1565C0', "armFiltrar('equipo','todas')")
-      + caja('📅 Con reunión o visita', n(function(c){return c.datos && c.datos.reunion;}), '#7B1FA2', null);
+      + caja('📅 Con reunión o visita', n(function(c){return c.datos && c.datos.reunion;}), '#7B1FA2', "armFiltrarCitas()");
   }
 
   let chats = armChats.slice();
   if(q) chats = chats.filter(function(c){ return ((c.nombre||'')+' '+(c.chat_id||'')+' '+(c.producto||'')+' '+(c.ciudad||'')).toLowerCase().indexOf(q) !== -1; });
   if(fEstado!=='todos') chats = chats.filter(function(c){ return c.estado===fEstado; });
   if(fCalif!=='todas') chats = chats.filter(function(c){ return (c.calificacion||'sin_datos')===fCalif; });
+  if(armSoloCitas) chats = chats.filter(function(c){ return c.datos && c.datos.reunion; });
 
   if(!chats.length){
     lista.innerHTML = '<div class="alert alert-warn">'+(armChats.length ? 'Ningún chat coincide con el filtro.' : 'El ARM todavía no atendió ningún chat.')+'</div>';
@@ -3258,6 +3259,14 @@ async function renderARM(recargar){
 function armFiltrar(estado, calif){
   const e=document.getElementById('arm-filtro-estado'), c=document.getElementById('arm-filtro-calif');
   if(e) e.value = estado; if(c) c.value = calif;
+  armSoloCitas = false;
+  renderARM(false);
+}
+// Solo los chats con reunión o visita agendada
+function armFiltrarCitas(){
+  const e=document.getElementById('arm-filtro-estado'), c=document.getElementById('arm-filtro-calif');
+  if(e) e.value = 'todos'; if(c) c.value = 'todas';
+  armSoloCitas = true;
   renderARM(false);
 }
 function armSeleccionar(chatId){ armChatSel = chatId; renderARM(false); }
