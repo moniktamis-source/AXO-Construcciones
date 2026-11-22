@@ -2829,6 +2829,30 @@ function linkWhatsApp(telefono, mensaje){
   return 'https://api.whatsapp.com/send?phone='+d+'&text='+encodeURIComponent(mensaje||'');
 }
 
+// 22/11/2026 — Un número = una sola ficha. El mismo teléfono entraba varias
+// veces (formulario repetido, Privyr, ARM) y el CRM llegó a tener 42 fichas
+// duplicadas. Normaliza igual que el ARM (normalizarTel en arm-whatsapp).
+function _telNormCRM(t){
+  let d = String(t||'').replace(/\D/g,'');
+  if (d.startsWith('00')) d = d.slice(2);
+  if (d.startsWith('0')) d = '595' + d.slice(1);
+  if (d.length === 9 && d.startsWith('9')) d = '595' + d;
+  return d;
+}
+// Devuelve el id del lead que ya tiene ese teléfono (el más reciente), o null.
+function _leadPorTelefono(leads, tel, excluirId){
+  const n = _telNormCRM(tel);
+  if (!n || n.length < 8) return null;
+  let mejor = null;
+  Object.keys(leads).forEach(id=>{
+    if (id === excluirId) return;
+    const l = leads[id];
+    if (!l || _telNormCRM(l.telefono) !== n) return;
+    if (!mejor || String(l.creadoEn||'') > String(leads[mejor].creadoEn||'')) mejor = id;
+  });
+  return mejor;
+}
+
 // Trae los leads cargados desde el formulario web (tabla axo_leads_web en
 // Supabase, alimentada por la landing page pública) y los suma al CRM.
 // silencioso=true cuando se llama automáticamente al abrir la pestaña CRM
@@ -2843,12 +2867,32 @@ async function importarLeadsWeb(silencioso){
     const leads = getCRM();
     const idsImportados = [];
     data.forEach(row=>{
-      const id = _nuevoIdCP('lead_');
-      const notas = [];
       // Preferimos created_at (columna automática de Supabase, siempre con hora)
       // sobre creado_en (columna manual de esta tabla, que en varios registros
       // llega sin hora — probablemente guardada como fecha simple en el origen).
       const ingresoTs = row.created_at || row.creado_en || new Date().toISOString();
+      // Si el número ya está en el CRM, no se crea otra ficha: se suma la
+      // nueva consulta a la existente (y si estaba perdido, se reabre).
+      const existente = _leadPorTelefono(leads, row.telefono);
+      if (existente) {
+        const l = leads[existente];
+        const interesNuevo = (row.interes && String(row.interes).trim()) || l.interes || 'Consulta general';
+        const coment = (row.comentario && row.comentario.trim()) ? ' — ' + row.comentario.trim() : '';
+        if (!l.notas) l.notas = [];
+        l.notas.unshift({ fecha: (ingresoTs||'').split('T')[0], texto: '🔁 Volvió a consultar por el formulario: ' + interesNuevo + coment });
+        if (!l.interesInicial && l.interes && l.interes !== interesNuevo) l.interesInicial = l.interes;
+        l.interes = interesNuevo;
+        if (!l.ciudad && row.ciudad) l.ciudad = row.ciudad;
+        if (l.etapa === 'perdido') {
+          l.etapa = 'nuevo';
+          l.motivoPerdida = '';
+          l.historialEtapas = (l.historialEtapas || []).concat([{ etapa: 'nuevo', fecha: ingresoTs }]);
+        }
+        idsImportados.push(row.id);
+        return;
+      }
+      const id = _nuevoIdCP('lead_');
+      const notas = [];
       if (row.comentario && row.comentario.trim()) {
         notas.push({ fecha: (ingresoTs||'').split('T')[0], texto: row.comentario.trim() });
       }
@@ -2924,6 +2968,11 @@ function setLeadCampo(id, campo, val){
   if (campo === 'etapa') registrarCambioEtapaLead(leads[id], id, val);
   // El "entró por" no se pierde al corregir el producto
   if (campo === 'interes' && !leads[id].interesInicial && leads[id].interes && leads[id].interes !== val) leads[id].interesInicial = leads[id].interes;
+  // Aviso si el teléfono ya pertenece a otra ficha (no bloquea: puede ser un familiar)
+  if (campo === 'telefono') {
+    const otro = _leadPorTelefono(leads, val, id);
+    if (otro) alert('⚠️ Ese número ya está en el CRM como "' + (leads[otro].nombre || 'sin nombre') + '". Revisá si es la misma persona para no duplicar la ficha.');
+  }
   leads[id][campo] = val;
   guardarCRM(leads);
   renderCRM();
