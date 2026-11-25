@@ -1,0 +1,18 @@
+{
+  "name": "AXO Marketing — Plan de contenidos",
+  "short_name": "AXO Marketing",
+  "description": "Plan de contenidos de Instagram y seguimiento de publicaciones — AXO Construcciones y Vivienda",
+  "id": "axo-marketing",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "lang": "es-PY",
+  "background_color": "#F4F1EB",
+  "theme_color": "#3E4938",
+  "categories": ["business", "productivity"],
+  "icons": [
+    { "src": "icono-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icono-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icono-512-maskable.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}

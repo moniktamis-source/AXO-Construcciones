@@ -1,0 +1,1331 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+<title>AXO Marketing</title>
+<meta name="robots" content="noindex">
+<link rel="manifest" href="manifest.json">
+<meta name="theme-color" content="#3E4938">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="AXO Marketing">
+<link rel="apple-touch-icon" href="icono-192.png">
+<link rel="icon" type="image/png" href="icono-192.png">
+
+<style>
+  /* Colores y tipografía del PDP (AXO_PDP_Instagram) */
+  :root{
+    --verde:#3E4938; --naranja:#EA733D; --tan:#C1B2A2; --beige:#EDE7E0;
+    --texto:#2B2B2B; --gris:#6B6B6B; --linea:#DAD6C8; --fondo:#F4F1EB;
+    --p-ensenio:#5B7FA6; --p-obra:#3E4938; --p-producto:#EA733D; --p-confianza:#8A6FA8;
+    --rojo:#B3261E;
+    --fuente: Calibri, Carlito, 'Segoe UI', Arial, sans-serif;
+  }
+  *{ box-sizing:border-box; -webkit-tap-highlight-color:transparent; }
+  html,body{ margin:0; background:var(--fondo); color:var(--texto); font-family:var(--fuente); line-height:1.4; }
+  body{ padding-bottom:calc(40px + env(safe-area-inset-bottom)); }
+
+  .barra{ position:sticky; top:0; z-index:20; background:var(--verde); color:#fff;
+          padding:calc(10px + env(safe-area-inset-top)) 14px 10px; display:flex; align-items:center; gap:10px; }
+  .barra b{ font-weight:700; font-size:17px; flex:1; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+  .barra b span{ color:var(--naranja); }
+  .bb{ background:rgba(255,255,255,.16); border:none; color:#fff; height:34px; min-width:34px; border-radius:9px;
+       font-size:14px; cursor:pointer; flex:none; padding:0 10px; font-weight:700; font-family:var(--fuente); }
+  .bb.volver{ font-size:20px; padding:0; }
+  .salir{ background:none; border:none; color:rgba(255,255,255,.85); font-size:13px; cursor:pointer; font-weight:700; flex:none; font-family:var(--fuente); }
+
+  .env{ max-width:1000px; margin:0 auto; padding:16px 12px 30px; }
+  .env.angosto{ max-width:480px; }
+  h1{ font-weight:700; font-size:28px; color:var(--verde); margin:6px 0 4px; }
+  h2{ font-weight:700; font-size:20px; color:var(--verde); margin:22px 0 10px; }
+  .sub{ font-size:15px; color:var(--gris); margin:0 0 16px; }
+
+  .caja{ background:#fff; border:1px solid var(--linea); border-radius:12px; padding:14px; margin-bottom:12px; }
+  label.b{ display:block; font-size:13px; font-weight:700; color:var(--texto); margin-bottom:5px; }
+
+  .btn{ display:inline-flex; align-items:center; justify-content:center; gap:7px; padding:10px 15px; font-size:15px;
+        font-weight:700; font-family:var(--fuente); border-radius:10px; cursor:pointer;
+        border:2px solid var(--verde); background:#fff; color:var(--verde); }
+  .btn:active{ transform:scale(.985); }
+  .btn.lleno{ background:var(--verde); color:#fff; }
+  .btn.naranja{ background:var(--naranja); border-color:var(--naranja); color:#fff; }
+  .btn:disabled{ opacity:.55; cursor:default; }
+  .btn.ancho{ width:100%; }
+  .btn.chico{ padding:7px 11px; font-size:13.5px; border-width:1.5px; }
+  .btn.peligro{ border-color:var(--rojo); color:var(--rojo); }
+  .fila-btn{ display:flex; gap:8px; flex-wrap:wrap; margin-bottom:14px; align-items:center; }
+
+  input[type=date], input[type=email], input[type=password], input[type=text], textarea, select{
+    width:100%; padding:10px 11px; font-size:15px; font-family:var(--fuente);
+    border:1px solid var(--linea); border-radius:9px; background:#fff; color:var(--texto); }
+  textarea{ min-height:80px; resize:vertical; line-height:1.4; }
+  .g3{ display:grid; grid-template-columns:repeat(3,1fr); gap:10px; }
+  @media (max-width:640px){ .g3{ grid-template-columns:1fr 1fr; } }
+
+  .tarjeta{ display:flex; align-items:center; gap:13px; width:100%; text-align:left; background:#fff;
+            border:1px solid var(--linea); border-radius:12px; padding:14px; margin-bottom:10px;
+            cursor:pointer; font-family:inherit; color:inherit; }
+  .tarjeta .t{ flex:1; min-width:0; }
+  .tarjeta .t b{ display:block; font-size:17px; color:var(--verde); }
+  .tarjeta .t span{ font-size:13.5px; color:var(--gris); }
+  .tarjeta .fl{ color:#bdb8a6; font-size:22px; }
+
+  /* ══ Diapositivas del PDP en pantalla ══ */
+  .sl{ background:#fff; border-radius:6px; box-shadow:0 1px 3px rgba(0,0,0,.08), 0 0 0 1px #E6E1D6;
+       margin-bottom:16px; padding:26px 30px 34px; position:relative; overflow:hidden; }
+  .sl .pie-sl{ position:absolute; left:30px; right:30px; bottom:10px; display:flex; justify-content:space-between;
+               font-size:10px; color:var(--gris); }
+  .sl .pie-sl b{ font-weight:700; }
+  @media (max-width:640px){ .sl{ padding:18px 16px 30px; } .sl .pie-sl{ left:16px; right:16px; } }
+
+  .sl.portada{ background:var(--verde); color:#fff; display:flex; align-items:center; gap:24px; min-height:300px; }
+  .sl.portada .pie-sl{ color:var(--tan); }
+  .portada .tit{ font-size:44px; font-weight:700; line-height:1.08; flex:1; }
+  .portada .tit span{ color:var(--naranja); display:block; }
+  .portada .st{ font-size:17px; color:var(--tan); margin-top:16px; font-weight:400; }
+  .portada img{ width:230px; max-width:38%; flex:none; }
+  @media (max-width:640px){ .portada .tit{ font-size:30px; } .sl.portada{ min-height:220px; } }
+
+  .sl h3{ font-size:34px; font-weight:700; color:var(--verde); margin:0 0 4px; }
+  .sl .bajada{ font-size:15px; color:var(--gris); margin:0 0 20px; }
+
+  .pils{ display:grid; grid-template-columns:repeat(4,1fr); gap:14px; }
+  @media (max-width:700px){ .pils{ grid-template-columns:1fr 1fr; } }
+  .pil{ background:var(--beige); border-radius:14px; padding:16px 16px 14px; cursor:pointer; border:2px solid transparent; }
+  .pil.on{ border-color:var(--texto); }
+  .pil i{ display:block; width:22px; height:22px; border-radius:50%; margin-bottom:10px; }
+  .pil b{ display:block; font-size:18px; }
+  .pil .pct{ font-size:36px; font-weight:700; line-height:1.15; margin:4px 0; }
+  .pil .d{ font-size:13px; min-height:52px; }
+  .pil .n{ font-size:12px; color:var(--gris); margin-top:8px; }
+
+  .grilla-sl{ display:flex; gap:26px; align-items:flex-start; }
+  .grilla-sl .izq{ flex:1; }
+  .leyenda div{ display:flex; align-items:center; gap:10px; font-size:15px; margin-bottom:8px; }
+  .leyenda i{ width:15px; height:15px; border-radius:50%; display:inline-block; }
+  .gr{ display:grid; grid-template-columns:repeat(3, 104px); gap:4px; flex:none; }
+  .gr .c{ width:104px; height:130px; position:relative; overflow:hidden; cursor:pointer; color:#fff;
+          font-size:11.5px; font-weight:700; padding:8px 7px; line-height:1.15; background-size:cover; background-position:center; }
+  .gr .c .f{ position:absolute; left:4px; bottom:4px; background:#000; color:#fff; font-size:9.5px; padding:1px 5px; }
+  @media (max-width:640px){ .grilla-sl{ flex-direction:column; } .gr{ grid-template-columns:repeat(3,1fr); width:100%; }
+    .gr .c{ width:auto; height:auto; aspect-ratio:4/5; } }
+
+  .sl.semana{ background:var(--naranja); color:#fff; text-align:left; padding:46px 30px 52px; }
+  .sl.semana .pie-sl{ color:var(--tan); }
+  .semana .s1{ font-size:40px; font-weight:700; line-height:1; }
+  .semana .s2{ font-size:18px; margin-top:6px; }
+
+  /* Ficha de cada post */
+  .ficha{ display:flex; gap:28px; }
+  .ficha .izq{ flex:1; min-width:0; }
+  .ficha .der{ width:400px; flex:none; }
+  @media (max-width:800px){ .ficha{ flex-direction:column; } .ficha .der{ width:100%; } }
+  .f-tit{ font-size:21px; font-weight:700; color:var(--naranja); margin:0; }
+  .f-sub{ font-size:14px; font-style:italic; margin:2px 0 12px; }
+  .f-fila{ display:flex; gap:16px; margin-bottom:14px; }
+  @media (max-width:520px){ .f-fila{ flex-direction:column; } }
+  .f-tabla{ border:1.5px solid var(--verde); border-radius:9px; padding:8px 12px; display:grid;
+            grid-template-columns:auto auto; column-gap:18px; font-size:12.5px; font-weight:700; flex:none; min-width:210px; }
+  .f-tabla .v{ text-align:right; }
+  .f-pieza{ font-size:12.5px; font-weight:700; flex:1; }
+  .f-pieza span{ font-weight:400; }
+  .f-copy-t{ font-size:13px; font-weight:700; margin-bottom:3px; }
+  .f-copy{ font-size:13px; white-space:pre-wrap; margin-bottom:10px; }
+  .f-hash{ font-size:11.5px; color:var(--verde); margin-bottom:12px; }
+  .f-est-t{ font-size:14px; font-weight:700; margin-bottom:5px; }
+  .f-est{ display:flex; gap:16px; flex-wrap:wrap; font-size:12.5px; }
+  .f-est button{ display:flex; align-items:center; gap:6px; background:none; border:none; padding:3px 0; cursor:pointer;
+                 font-family:var(--fuente); font-size:12.5px; color:var(--texto); }
+  .f-est button i{ width:14px; height:14px; border-radius:50%; border:1.5px solid var(--texto); display:inline-block; flex:none; }
+  .f-est button.on{ font-weight:700; }
+  .f-est button.on i{ background:var(--texto); box-shadow:inset 0 0 0 2px #fff; }
+  .f-acc{ display:flex; gap:8px; flex-wrap:wrap; margin-top:14px; padding-top:12px; border-top:1px dashed var(--linea); }
+  .f-com{ font-size:12px; color:#A3420F; font-weight:700; }
+
+  .imgs{ display:grid; grid-template-columns:1fr 1fr; gap:8px; }
+  .imgs img{ width:100%; aspect-ratio:4/5; object-fit:cover; display:block; cursor:zoom-in; }
+  .imgs.una{ grid-template-columns:1fr; }
+  .imgs.una img{ aspect-ratio:auto; max-height:480px; object-fit:contain; }
+  .guion{ background:var(--verde); border-radius:16px; padding:20px 20px; color:#fff; min-height:340px; }
+  .guion b{ color:var(--naranja); font-size:14px; display:block; margin-bottom:12px; }
+  .guion p{ font-size:14.5px; margin:0 0 12px; }
+  .tiles{ display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+  .tiles.dos{ grid-template-columns:1fr 1fr; }
+  .tiles div{ background:var(--beige); border:1px solid var(--tan); color:var(--verde); font-weight:700; font-size:13px;
+              padding:9px; aspect-ratio:4/5; white-space:pre-wrap; overflow:hidden; display:flex; align-items:center; justify-content:center; text-align:center; }
+  .tiles.dos div + div{ display:block; text-align:left; }
+  .tiles div:first-child{ background:var(--verde); border-color:var(--verde); color:#fff; font-size:15px; }
+  .tiles.dos div{ font-size:12px; }
+  .placeholder{ background:var(--beige); border:1px solid var(--tan); color:var(--verde); font-weight:700; font-size:14px;
+                padding:12px; min-height:340px; }
+
+  /* Seguimiento (barra superior del plan) */
+  .resumen{ display:flex; gap:7px; flex-wrap:wrap; margin-bottom:12px; }
+  .resumen button{ font-family:var(--fuente); cursor:pointer; border:1.5px solid var(--linea); background:#fff;
+                   border-radius:20px; padding:5px 12px; font-size:13.5px; font-weight:700; color:var(--texto); }
+  .resumen button .n{ color:var(--naranja); margin-right:4px; }
+  .resumen button.on{ background:var(--texto); color:#fff; border-color:var(--texto); }
+  .resumen button.on .n{ color:#fff; }
+  .tabs{ display:flex; gap:4px; border-bottom:1px solid var(--linea); margin:4px 0 14px; overflow-x:auto; }
+  .tabs button{ background:none; border:none; padding:9px 13px; font-family:var(--fuente); font-size:15px; font-weight:700;
+                color:var(--gris); cursor:pointer; border-bottom:3px solid transparent; white-space:nowrap; }
+  .tabs button.on{ color:var(--verde); border-bottom-color:var(--naranja); }
+
+  .coment{ border-left:3px solid var(--tan); padding:5px 0 5px 10px; margin-bottom:9px; }
+  .coment .q{ font-size:12px; color:var(--gris); }
+  .coment .x{ background:none; border:none; color:var(--gris); cursor:pointer; font-size:12px; text-decoration:underline; padding:0; margin-left:6px; }
+  .tabla{ width:100%; border-collapse:collapse; }
+  .tabla td{ padding:5px 4px; vertical-align:top; border-bottom:1px solid #EEEBE2; }
+  .tabla td:first-child{ width:120px; }
+  .check{ display:flex; gap:12px; align-items:flex-start; padding:11px 0; border-bottom:1px solid #EEEBE2; }
+  .check input{ width:21px; height:21px; flex:none; accent-color:var(--verde); margin-top:2px; }
+  .check b{ display:block; font-size:15px; color:var(--verde); }
+  .check span{ font-size:14px; white-space:pre-wrap; }
+  .check.hecho b, .check.hecho span{ color:var(--gris); text-decoration:line-through; }
+  .ed-imgs{ display:flex; gap:8px; flex-wrap:wrap; margin:8px 0; }
+  .ed-imgs div{ position:relative; width:92px; height:115px; }
+  .ed-imgs img{ width:100%; height:100%; object-fit:cover; border-radius:6px; }
+  .ed-imgs button{ position:absolute; top:3px; right:3px; width:24px; height:24px; border-radius:50%; border:2px solid #fff;
+                   background:var(--rojo); color:#fff; font-weight:700; cursor:pointer; line-height:1; }
+
+  .aviso{ border-radius:10px; padding:11px 13px; font-size:14.5px; margin-bottom:12px; }
+  .aviso.mal{ background:#FDECEA; color:var(--rojo); border:1px solid #F5C6C2; }
+  .aviso.ok{ background:#E8EDE4; color:var(--verde); border:1px solid #C3D6BC; }
+  .aviso.info{ background:#FFF8E8; color:#8A5A00; border:1px solid #F0DFB8; }
+  .vacio{ text-align:center; color:var(--gris); font-size:15px; padding:30px 12px; }
+  .pie{ text-align:center; font-size:12.5px; color:var(--gris); margin-top:20px; }
+  .oculto{ display:none !important; }
+  #toast{ position:fixed; left:50%; bottom:calc(22px + env(safe-area-inset-bottom)); transform:translateX(-50%) translateY(30px);
+          background:var(--verde); color:#fff; padding:10px 18px; border-radius:10px; font-size:15px;
+          opacity:0; transition:all .25s; pointer-events:none; z-index:50; max-width:90vw; }
+  #toast.ver{ opacity:1; transform:translateX(-50%) translateY(0); }
+  #visor{ position:fixed; inset:0; background:rgba(0,0,0,.85); z-index:60; display:flex; align-items:center; justify-content:center; cursor:zoom-out; }
+  #visor img{ max-width:94vw; max-height:92vh; }
+  .lista-import{ font-size:14.5px; margin:8px 0 0; padding-left:18px; }
+</style>
+</head>
+<body>
+
+<div class="barra">
+  <button class="bb volver oculto" id="btn-volver" onclick="volver()">‹</button>
+  <b id="titulo">AXO <span>Marketing</span></b>
+  <button class="bb oculto" id="btn-refrescar" onclick="refrescar()" title="Traer lo último">🔄</button>
+  <button class="salir oculto" id="btn-salir" onclick="salir()">Salir</button>
+</div>
+
+<div class="env" id="env">
+
+  <!-- ── INGRESO ── -->
+  <section id="p-login" class="oculto">
+    <h1>Entrar</h1>
+    <p class="sub">Con tu mismo correo y contraseña de AXO.</p>
+    <div id="login-error" class="aviso mal oculto"></div>
+    <div class="caja">
+      <label class="b" for="email">Correo</label>
+      <input type="email" id="email" autocomplete="username" inputmode="email" placeholder="tu@axo.com" style="margin-bottom:12px">
+      <label class="b" for="pass">Contraseña</label>
+      <input type="password" id="pass" autocomplete="current-password" placeholder="••••••••" onkeydown="if(event.key==='Enter')entrar()">
+    </div>
+    <button class="btn lleno ancho" id="btn-entrar" onclick="entrar()">Entrar</button>
+    <p class="pie">Si no te acordás la contraseña, pedísela a la administración.</p>
+  </section>
+
+  <!-- ── PLANES ── -->
+  <section id="p-planes" class="oculto">
+    <h1>Planes de contenido</h1>
+    <p class="sub" id="planes-quien"></p>
+    <div class="fila-btn">
+      <label class="btn lleno" style="cursor:pointer">📥 Importar PPT o Excel
+        <input type="file" accept=".pptx,.xlsx,.xls" class="oculto" onchange="elegirArchivo(this)">
+      </label>
+      <button class="btn" onclick="nuevoMes()">＋ Mes vacío</button>
+    </div>
+    <div id="planes-lista"></div>
+  </section>
+
+  <!-- ── VISTA PREVIA DE IMPORTACIÓN ── -->
+  <section id="p-import" class="oculto">
+    <h1>Importar</h1>
+    <p class="sub" id="imp-archivo"></p>
+    <div id="imp-cuerpo"></div>
+    <div class="fila-btn" style="margin-top:12px">
+      <button class="btn lleno" id="btn-imp-ok" onclick="confirmarImport()">Confirmar e importar</button>
+      <button class="btn" onclick="volver()">Cancelar</button>
+    </div>
+    <div class="sub" id="imp-progreso"></div>
+  </section>
+
+  <!-- ── PLAN DEL MES ── -->
+  <section id="p-plan" class="oculto">
+    <div class="tabs" id="plan-tabs">
+      <button data-tab="plan" class="on">Plan</button>
+      <button data-tab="historias">Historias semanales</button>
+      <button data-tab="perfil">Arreglos del perfil</button>
+    </div>
+
+    <div id="tab-plan">
+      <div class="resumen" id="resumen"></div>
+      <div class="fila-btn">
+        <button class="btn chico naranja" id="btn-ppt" onclick="bajarPPT()">⬇ Bajar PPT</button>
+        <button class="btn chico" onclick="nuevoPost()">＋ Agregar publicación</button>
+        <label class="btn chico" style="cursor:pointer">📥 Actualizar desde PPT o Excel
+          <input type="file" accept=".pptx,.xlsx,.xls" class="oculto" onchange="elegirArchivo(this)">
+        </label>
+        <button class="btn chico" onclick="editarPlan()">✎ Portada y pilares</button>
+        <button class="btn chico peligro" onclick="borrarPlan()">Borrar mes</button>
+      </div>
+      <div id="pdp"></div>
+    </div>
+
+    <div id="tab-historias" class="oculto">
+      <p class="sub">Qué subir en historias cada día de la semana.</p>
+      <div class="caja"><table class="tabla" id="hist-tabla"></table></div>
+      <div class="fila-btn">
+        <button class="btn chico" onclick="agregarHistoria()">＋ Agregar fila</button>
+        <button class="btn chico lleno" onclick="guardarHistorias()">Guardar historias</button>
+      </div>
+    </div>
+
+    <div id="tab-perfil" class="oculto">
+      <p class="sub">Tildá cada arreglo cuando quede hecho. Se guarda solo.</p>
+      <div class="caja" id="arreglos-lista"></div>
+      <div class="caja">
+        <label class="b">Nuevo arreglo</label>
+        <input type="text" id="arr-que" placeholder="Qué arreglar" style="margin-bottom:8px">
+        <textarea id="arr-prop" placeholder="Propuesta" style="min-height:60px"></textarea>
+        <button class="btn chico" style="margin-top:9px" onclick="agregarArreglo()">＋ Agregar</button>
+      </div>
+    </div>
+  </section>
+
+  <!-- ── PORTADA Y PILARES ── -->
+  <section id="p-planed" class="oculto">
+    <h1>Portada y pilares</h1>
+    <div class="caja">
+      <label class="b">Debajo del título (portada)</label>
+      <input type="text" id="pe-sub" style="margin-bottom:10px">
+      <label class="b">Frecuencia (diapositiva «Plan de contenidos»)</label>
+      <input type="text" id="pe-frec">
+    </div>
+    <div id="pe-pilares"></div>
+    <button class="btn lleno" onclick="guardarPlanEd()">Guardar</button>
+  </section>
+
+  <!-- ── EDITAR PUBLICACIÓN ── -->
+  <section id="p-post" class="oculto">
+    <h1 id="post-titulo"></h1>
+    <p class="sub" id="post-sub"></p>
+    <div class="caja">
+      <div class="g3" style="margin-bottom:10px">
+        <div><label class="b">N.º de post</label><input type="text" id="f-numero" inputmode="numeric"></div>
+        <div style="grid-column:span 2"><label class="b">Tema</label><input type="text" id="f-tema"></div>
+      </div>
+      <div class="g3">
+        <div><label class="b">Subtítulo</label><input type="text" id="f-subtitulo" placeholder="Feed + Story"></div>
+        <div><label class="b">Pilar</label><select id="f-pilar"></select></div>
+        <div><label class="b">Formato</label><select id="f-formato"></select></div>
+        <div><label class="b">Ratio</label><select id="f-ratio"></select></div>
+        <div><label class="b">Fecha</label><input type="date" id="f-fecha"></div>
+        <div><label class="b">Hora</label><input type="text" id="f-hora" placeholder="19:30"></div>
+        <div style="grid-column:span 2"><label class="b">Canal</label><input type="text" id="f-canal" placeholder="Instagram + Facebook"></div>
+      </div>
+    </div>
+    <div class="caja">
+      <label class="b">Pieza</label>
+      <textarea id="f-pieza" style="min-height:60px;margin-bottom:10px"></textarea>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:8px;margin-bottom:5px">
+        <label class="b" style="margin:0">Copy</label>
+        <button class="btn chico" onclick="copiarTexto()">📋 Copiar copy + hashtags</button>
+      </div>
+      <textarea id="f-copy" style="min-height:170px;margin-bottom:10px"></textarea>
+      <label class="b">Hashtags</label>
+      <textarea id="f-hashtags" style="min-height:48px;margin-bottom:10px"></textarea>
+      <label class="b">Historias de ese día</label>
+      <textarea id="f-historias" style="min-height:48px"></textarea>
+    </div>
+    <div class="caja">
+      <label class="b">Lado derecho de la ficha</label>
+      <p class="sub" style="font-size:13px;margin:0 0 8px">Se muestra en este orden: imágenes de la pieza → guion del reel → textos de las slides.</p>
+      <label class="b">Imágenes de la pieza</label>
+      <div class="ed-imgs" id="ed-imgs"></div>
+      <label class="btn chico" style="cursor:pointer;margin-bottom:12px">🖼️ Agregar imagen
+        <input type="file" accept="image/*" multiple class="oculto" onchange="subirImagenes(this)">
+      </label>
+      <label class="b">REEL · guion (una línea por toma)</label>
+      <textarea id="f-guion" style="min-height:90px;margin-bottom:10px"></textarea>
+      <label class="b">Textos de las slides (separá cada slide con una línea que diga ---)</label>
+      <textarea id="f-slides" style="min-height:90px"></textarea>
+    </div>
+    <div class="fila-btn">
+      <button class="btn lleno" id="btn-guardar-post" onclick="guardarPost()">Guardar cambios</button>
+      <button class="btn peligro" onclick="borrarPost()">Borrar publicación</button>
+    </div>
+    <p class="sub" id="post-ultimo" style="font-size:12.5px"></p>
+
+    <h2>Ajustes y comentarios</h2>
+    <div class="caja">
+      <div id="coment-lista"></div>
+      <textarea id="coment-nuevo" placeholder="Escribí el ajuste o comentario…" style="min-height:60px"></textarea>
+      <label style="display:flex;gap:8px;align-items:center;font-size:14px;margin:8px 0;color:var(--gris)">
+        <input type="checkbox" id="coment-ajuste" checked style="width:18px;height:18px;accent-color:var(--verde)">
+        Marcar la publicación «Con ajustes»
+      </label>
+      <button class="btn chico lleno" onclick="comentar()">Enviar comentario</button>
+    </div>
+  </section>
+
+  <div id="caja-instalar" class="aviso info oculto" style="margin-top:20px">
+    <b>Tenelo como aplicación</b><br>
+    <span id="instalar-texto">Se abre solo, sin buscar el link cada vez.</span>
+    <button class="btn chico oculto" id="btn-instalar" style="margin-top:10px" onclick="instalar()">📲 Instalar</button>
+  </div>
+</div>
+
+<div id="toast"></div>
+<div id="visor" class="oculto" onclick="this.classList.add('oculto')"><img id="visor-img" alt=""></div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/pptxgenjs@3.12.0/dist/pptxgen.bundle.js"></script>
+<script>
+// ═══════════════════════════════════════════════════════════════════
+// AXO Marketing — plan de contenidos de Instagram (PDP)
+//
+// App APARTE del Sistema AXO, igual que /obra/: tiene su propio link y
+// no toca el index.html del sistema ni sus datos. Solo comparte los
+// usuarios (mismo correo y contraseña). Sus datos van en tablas propias:
+//   axo_mkt_planes · axo_mkt_posts · axo_mkt_comentarios · bucket 'marketing'
+//
+// Respeta el formato del PDP: portada, plan de contenidos con pilares,
+// grilla, separador por semana y ficha de cada post. Se importa desde el
+// PDP (.pptx) o el plan (.xlsx) y se vuelve a bajar en .pptx con el mismo
+// diseño y el estado actual marcado.
+// ═══════════════════════════════════════════════════════════════════
+
+const SUPABASE_URL = 'https://uhvfnvqjzrwyriwbqvfu.supabase.co';
+const SUPABASE_KEY = 'sb_publishable_P71pLzSZflQSHddzvt-90w_uhynN4g6';
+const BUCKET = 'marketing';
+
+let supa = null;
+try { supa = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY); }
+catch(e){ console.warn('Supabase no cargó', e); }
+
+const $ = id => document.getElementById(id);
+const esc = s => String(s==null?'':s).replace(/[<>&"']/g, c => ({'<':'&lt;','>':'&gt;','&':'&amp;','"':'&quot;',"'":'&#39;'}[c]));
+function norm(s){ return String(s==null?'':s).toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/\s+/g,' ').trim(); }
+
+// Los cuatro casilleros del PDP. «Sin marcar» = ninguno tildado.
+const ESTADOS = [
+  { id:'en_proceso',  txt:'En proceso'  },
+  { id:'con_ajustes', txt:'Con ajustes' },
+  { id:'aprobado',    txt:'Aprobado'    },
+  { id:'publicado',   txt:'Programado / Publicado' }
+];
+const estadoTxt = id => id === 'sin_marcar' ? 'Sin marcar' : (ESTADOS.find(e => e.id === id) || {}).txt || id;
+
+const PILARES_BASE = [
+  { nombre:'Te enseño', pct:30, desc:'Humedad, fisuras, errores de obra, costos. Te posiciona como experta.', color:'5B7FA6' },
+  { nombre:'Obra real', pct:30, desc:'Antes y después, avances, obras terminadas. Muestra lo que hacés.', color:'3E4938' },
+  { nombre:'Producto',  pct:20, desc:'Catálogo con precio "desde". Trae consultas.', color:'EA733D' },
+  { nombre:'Confianza', pct:20, desc:'Clientes, equipo, cómo trabajamos. Ayuda a cerrar.', color:'8A6FA8' }
+];
+const FREC_BASE = '3 publicaciones por semana · lunes, miércoles y viernes · 19:30 HS. · más historias casi todos los días';
+const FORMATOS = ['Carrusel','Reel','Foto','Historia','Video'];
+const RATIOS = ['4:5','9:16','1:1','16:9'];
+const MESES = ['enero','febrero','marzo','abril','mayo','junio','julio','agosto','septiembre','octubre','noviembre','diciembre'];
+const DIAS = ['Domingo','Lunes','Martes','Miércoles','Jueves','Viernes','Sábado'];
+
+let USUARIO = '', PANT = 'login';
+let PLANES = [], PLAN = null, POSTS = [], NCOM = {}, POST = null;
+let FILTRO = null, IMPORT = null;
+
+// ── Navegación ───────────────────────────────────────────────────
+const PANTALLAS = ['login','planes','import','plan','planed','post'];
+function mostrar(p){
+  PANT = p;
+  PANTALLAS.forEach(x => $('p-'+x).classList.toggle('oculto', x !== p));
+  $('env').classList.toggle('angosto', p === 'login');
+  $('btn-volver').classList.toggle('oculto', p === 'login' || p === 'planes');
+  $('btn-salir').classList.toggle('oculto', p === 'login');
+  $('btn-refrescar').classList.toggle('oculto', !['planes','plan'].includes(p));
+  $('caja-instalar').classList.toggle('oculto', p === 'login' || yaInstalada());
+  $('titulo').innerHTML = (['plan','post','planed'].includes(p) && PLAN) ? 'AXO <span>Marketing</span> · ' + esc(nombreMes(PLAN.mes)) : 'AXO <span>Marketing</span>';
+  window.scrollTo(0,0);
+}
+function volver(){
+  if (PANT === 'post' || PANT === 'planed'){ pintarPlan(); mostrar('plan'); }
+  else if (PANT === 'import' && IMPORT && IMPORT.desdePlan && PLAN){ mostrar('plan'); }
+  else { cargarPlanes(); mostrar('planes'); }
+}
+function toast(t){ const el = $('toast'); el.textContent = t; el.classList.add('ver'); clearTimeout(toast._t); toast._t = setTimeout(() => el.classList.remove('ver'), 2300); }
+function fallo(e, donde){ console.warn(donde, e); alert((donde ? donde + ': ' : '') + (e && e.message ? e.message : 'no se pudo completar') + '\nRevisá la señal y probá de nuevo.'); }
+async function refrescar(){ if (PANT === 'planes') await cargarPlanes(); else if (PANT === 'plan') await abrirPlan(PLAN.id, true); toast('Actualizado'); }
+function verImagen(u){ $('visor-img').src = u; $('visor').classList.remove('oculto'); }
+
+// ── Fechas ───────────────────────────────────────────────────────
+function nombreMes(mes){ if (!mes) return ''; const [a,m] = mes.split('-').map(Number); const n = MESES[m-1] || mes; return n.charAt(0).toUpperCase() + n.slice(1) + ' ' + a; }
+function fechaObj(s){ const [a,m,d] = s.split('-').map(Number); return new Date(a, m-1, d); }
+function iso(a,m,d){ return a + '-' + String(m).padStart(2,'0') + '-' + String(d).padStart(2,'0'); }
+function ddmm(s){ if (!s) return ''; const [,m,d] = s.split('-'); return d + '/' + m; }
+function fechaFicha(s){ return s ? DIAS[fechaObj(s).getDay()] + ' ' + ddmm(s) : ''; }
+function hoyTxt(){ const h = new Date(); return String(h.getDate()).padStart(2,'0') + '/' + String(h.getMonth()+1).padStart(2,'0'); }
+function semanaDe(s){ const f = fechaObj(s); const corr = (new Date(f.getFullYear(), f.getMonth(), 1).getDay() + 6) % 7; return Math.floor((f.getDate() - 1 + corr) / 7) + 1; }
+function rangoSemana(s){
+  const f = fechaObj(s), dow = (f.getDay() + 6) % 7;
+  const ini = new Date(f); ini.setDate(f.getDate() - dow);
+  const fin = new Date(ini); fin.setDate(ini.getDate() + 6);
+  const ult = new Date(f.getFullYear(), f.getMonth()+1, 0).getDate();
+  const di = ini.getMonth() === f.getMonth() ? ini.getDate() : 1;
+  const df = fin.getMonth() === f.getMonth() ? fin.getDate() : ult;
+  return di + ' al ' + df + ' de ' + MESES[f.getMonth()];
+}
+
+// ── Ingreso ──────────────────────────────────────────────────────
+async function entrar(){
+  const email = ($('email').value||'').trim(), pass = $('pass').value||'';
+  const err = $('login-error'); err.classList.add('oculto');
+  if (!email || !pass){ err.textContent = 'Poné tu correo y tu contraseña.'; err.classList.remove('oculto'); return; }
+  if (!supa){ err.textContent = 'No se pudo conectar. Revisá la señal.'; err.classList.remove('oculto'); return; }
+  const btn = $('btn-entrar'); btn.disabled = true; btn.textContent = 'Entrando…';
+  const { data, error } = await supa.auth.signInWithPassword({ email, password: pass });
+  btn.disabled = false; btn.textContent = 'Entrar';
+  if (error){ err.textContent = 'No pudimos entrar. Revisá el correo y la contraseña.'; err.classList.remove('oculto'); return; }
+  USUARIO = (data && data.user && data.user.email) || email;
+  $('pass').value = ''; arrancar();
+}
+async function salir(){ if (!confirm('¿Cerrar sesión en este dispositivo?')) return; try { await supa.auth.signOut(); } catch(e){} USUARIO = ''; mostrar('login'); }
+function arrancar(){ $('planes-quien').textContent = USUARIO ? 'Entraste como ' + USUARIO : ''; mostrar('planes'); cargarPlanes(); }
+
+// ── Planes ───────────────────────────────────────────────────────
+async function cargarPlanes(){
+  const cont = $('planes-lista');
+  if (!PLANES.length) cont.innerHTML = '<div class="vacio">Buscando planes…</div>';
+  try{
+    const { data, error } = await supa.from('axo_mkt_planes').select('id,mes').order('mes', { ascending:false });
+    if (error) throw error;
+    PLANES = data || [];
+    const { data: ps, error: e2 } = await supa.from('axo_mkt_posts').select('plan_id,estado');
+    if (e2) throw e2;
+    const cu = {};
+    (ps||[]).forEach(p => { const c = cu[p.plan_id] = cu[p.plan_id] || { t:0, pub:0, aj:0 }; c.t++; if (p.estado === 'publicado') c.pub++; if (p.estado === 'con_ajustes') c.aj++; });
+    if (!PLANES.length){ cont.innerHTML = '<div class="vacio">Todavía no hay planes.<br>Importá el PDP en PowerPoint o el plan en Excel para arrancar.</div>'; return; }
+    cont.innerHTML = PLANES.map(p => { const c = cu[p.id] || { t:0, pub:0, aj:0 };
+      return '<button class="tarjeta" data-plan="' + p.id + '"><span style="font-size:26px">🗓️</span><span class="t"><b>' + esc(nombreMes(p.mes)) +
+        '</b><span>' + c.t + ' publicaciones · ' + c.pub + ' programadas / publicadas' + (c.aj ? ' · <b style="display:inline;color:#A3420F;font-size:13.5px">' + c.aj + ' con ajustes</b>' : '') +
+        '</span></span><span class="fl">›</span></button>'; }).join('');
+  }catch(e){
+    cont.innerHTML = '<div class="aviso mal">No se pudieron traer los planes.<br>' + esc(e.message||'') + '</div>';
+  }
+}
+$('planes-lista').addEventListener('click', ev => { const b = ev.target.closest('[data-plan]'); if (b) abrirPlan(b.dataset.plan); });
+
+async function nuevoMes(){
+  const h = new Date(); h.setMonth(h.getMonth()+1);
+  const mes = (prompt('¿Qué mes? (AAAA-MM)', h.getFullYear() + '-' + String(h.getMonth()+1).padStart(2,'0')) || '').trim();
+  if (!mes) return;
+  if (!/^\d{4}-\d{2}$/.test(mes)){ alert('Escribilo así: 2027-01'); return; }
+  if (PLANES.some(p => p.mes === mes)){ alert('Ese mes ya existe.'); return; }
+  try{
+    const { data, error } = await supa.from('axo_mkt_planes').insert({ mes, distribucion: PILARES_BASE.map(p => ({ nombre:p.nombre, pct:p.pct, desc:p.desc })), actualizado_por: USUARIO }).select().single();
+    if (error) throw error;
+    toast('Mes creado'); abrirPlan(data.id);
+  }catch(e){ fallo(e, 'No se pudo crear el mes'); }
+}
+
+async function abrirPlan(id, quedarse){
+  try{
+    const [{ data: pl, error: e1 }, { data: ps, error: e2 }] = await Promise.all([
+      supa.from('axo_mkt_planes').select('*').eq('id', id).single(),
+      supa.from('axo_mkt_posts').select('*').eq('plan_id', id)
+    ]);
+    if (e1) throw e1; if (e2) throw e2;
+    PLAN = pl; POSTS = ordenar(ps || []); NCOM = {};
+    if (POSTS.length){
+      const { data: cs } = await supa.from('axo_mkt_comentarios').select('post_id').in('post_id', POSTS.map(p => p.id));
+      (cs||[]).forEach(c => NCOM[c.post_id] = (NCOM[c.post_id]||0) + 1);
+    }
+    if (!quedarse){ FILTRO = null; elegirTab('plan'); }
+    pintarPlan();
+    if (!quedarse) mostrar('plan');
+  }catch(e){ fallo(e, 'No se pudo abrir el plan'); }
+}
+function ordenar(l){ return l.sort((a,b) => (a.fecha||'9999').localeCompare(b.fecha||'9999') || (a.numero||0) - (b.numero||0)); }
+
+function pilaresPlan(){
+  const d = (PLAN && Array.isArray(PLAN.distribucion) && PLAN.distribucion.length) ? PLAN.distribucion : PILARES_BASE;
+  return d.map(p => { const b = PILARES_BASE.find(x => norm(x.nombre) === norm(p.nombre)); return Object.assign({ color: b ? b.color : '9AA393' }, p, { color: b ? b.color : (p.color || '9AA393') }); });
+}
+function colorPilar(n){ const p = pilaresPlan().find(x => norm(x.nombre) === norm(n)); return p ? p.color : '9AA393'; }
+const planSub  = () => PLAN.subtitulo || 'Instagram @axo.py';
+const planFrec = () => PLAN.frecuencia || FREC_BASE;
+
+$('plan-tabs').addEventListener('click', ev => { const b = ev.target.closest('[data-tab]'); if (b) elegirTab(b.dataset.tab); });
+function elegirTab(t){
+  document.querySelectorAll('#plan-tabs button').forEach(b => b.classList.toggle('on', b.dataset.tab === t));
+  ['plan','historias','perfil'].forEach(x => $('tab-'+x).classList.toggle('oculto', x !== t));
+}
+
+// ══ El PDP en pantalla ═══════════════════════════════════════════
+function pieSl(){ return '<div class="pie-sl"><span><b>AXO</b> Construcciones</span><span>© ' + PLAN.mes.slice(0,4) + '</span></div>'; }
+
+function pintarPlan(){
+  const cuenta = id => POSTS.filter(p => p.estado === id).length;
+  $('resumen').innerHTML = [{ id:'sin_marcar', txt:'Sin marcar' }].concat(ESTADOS).map(e =>
+    '<button data-fe="' + e.id + '" class="' + (FILTRO === e.id ? 'on' : '') + '"><span class="n">' + cuenta(e.id) + '</span>' + e.txt + '</button>').join('') +
+    (FILTRO ? '<button data-fe="">✕ Ver todo</button>' : '');
+
+  const [a, m] = PLAN.mes.split('-');
+  let h = '';
+  if (!FILTRO){
+    // 1 · Portada
+    h += '<div class="sl portada"><div class="tit">PLAN DE<br>CONTENIDOS<span>' + esc(MESES[+m-1].charAt(0).toUpperCase() + MESES[+m-1].slice(1) + ' ' + a) + '</span>' +
+         '<div class="st">' + esc(planSub()) + '</div></div><img src="logo.png" alt="AXO">' + pieSl() + '</div>';
+    // 2 · Plan de contenidos
+    h += '<div class="sl"><h3>Plan de contenidos</h3><p class="bajada">' + esc(planFrec()) + '</p><div class="pils">' +
+      pilaresPlan().map(p => { const n = POSTS.filter(x => norm(x.pilar) === norm(p.nombre)).length;
+        return '<div class="pil" title="Tocá para ver solo este pilar" data-pilar="' + esc(p.nombre) + '"><i style="background:#' + p.color + '"></i><b>' + esc(p.nombre) + '</b>' +
+          '<div class="pct" style="color:#' + p.color + '">' + esc(p.pct) + '%</div><div class="d">' + esc(p.desc) + '</div>' +
+          '<div class="n">' + n + ' post' + (n===1?'':'s') + ' este mes</div></div>'; }).join('') + '</div>' + pieSl() + '</div>';
+    // 3 · Grilla
+    const inv = POSTS.filter(p => p.fecha).slice().reverse();
+    h += '<div class="sl"><div class="grilla-sl"><div class="izq"><h3>Grilla</h3><p class="bajada">Así se va a ver el perfil a fin de mes (lo más nuevo arriba a la izquierda).</p>' +
+      '<div class="leyenda">' + pilaresPlan().map(p => '<div><i style="background:#' + p.color + '"></i>' + esc(p.nombre) + '</div>').join('') + '</div>' +
+      '<p class="bajada" style="font-size:13px;margin-top:14px">Los cuadros de color son piezas por diseñar o grabar.</p></div>' +
+      '<div class="gr">' + inv.map(p => { const img = (p.imagenes||[])[0];
+        return '<div class="c" data-ir="' + p.id + '" style="' + (img ? 'background-image:url(' + esc(img.u) + ')' : 'background:#' + colorPilar(p.pilar)) + '">' +
+          (img ? '' : esc(p.tema)) + '<span class="f">' + ddmm(p.fecha) + '</span></div>'; }).join('') + '</div></div>' + pieSl() + '</div>';
+  }
+  // 4 · Semanas y fichas
+  const lista = FILTRO ? POSTS.filter(p => (FILTRO.indexOf('pilar:') === 0 ? norm(p.pilar) === norm(FILTRO.slice(6)) : p.estado === FILTRO)) : POSTS;
+  let semAnt = null;
+  lista.forEach(p => {
+    const sem = p.fecha ? semanaDe(p.fecha) : 0;
+    if (!FILTRO && sem !== semAnt){
+      h += '<div class="sl semana"><div class="s1">' + (p.fecha ? 'SEMANA ' + sem : 'SIN FECHA') + '</div><div class="s2">' + (p.fecha ? rangoSemana(p.fecha) : '') + '</div>' + pieSl() + '</div>';
+      semAnt = sem;
+    }
+    h += fichaHTML(p);
+  });
+  if (!lista.length) h += '<div class="vacio">' + (POSTS.length ? 'No hay publicaciones con ese filtro.' : 'Este mes no tiene publicaciones todavía.') + '</div>';
+  $('pdp').innerHTML = h;
+  pintarHistorias(); pintarArreglos();
+}
+$('resumen').addEventListener('click', ev => { const b = ev.target.closest('[data-fe]'); if (!b) return; FILTRO = (!b.dataset.fe || FILTRO === b.dataset.fe) ? null : b.dataset.fe; pintarPlan(); });
+
+function derechaHTML(p){
+  const imgs = p.imagenes || [];
+  if (imgs.length) return '<div class="imgs' + (imgs.length === 1 ? ' una' : '') + '">' + imgs.slice(0,4).map(i => '<img src="' + esc(i.u) + '" data-ver="' + esc(i.u) + '" loading="lazy">').join('') + '</div>';
+  if (p.guion) return '<div class="guion"><b>REEL · guion</b>' + p.guion.split('\n').filter(x => x.trim()).map(l => '<p>' + esc(l) + '</p>').join('') + '</div>';
+  const sl = p.slides || [];
+  if (sl.length === 1) return '<div class="placeholder">' + esc(sl[0]) + '</div>';
+  if (sl.length) return '<div class="tiles' + (sl.length === 2 ? ' dos' : '') + '">' + sl.slice(0,6).map(t => '<div>' + esc(t) + '</div>').join('') + '</div>';
+  return '<div class="placeholder" style="color:var(--gris);font-weight:400">Pieza por diseñar o grabar</div>';
+}
+function fichaHTML(p){
+  const c = colorPilar(p.pilar);
+  return '<div class="sl" id="ficha-' + p.id + '"><div class="ficha"><div class="izq">' +
+    '<p class="f-tit">Post ' + esc(p.numero || '') + ' · ' + esc(p.tema || 'Sin tema') + '</p>' +
+    '<p class="f-sub">' + esc(p.subtitulo || 'Feed + Story') + '</p>' +
+    '<div class="f-fila"><div class="f-tabla"><span>Pilar</span><span class="v" style="color:#' + c + '">' + esc(p.pilar) + '</span>' +
+      '<span>Formato</span><span class="v">' + esc(p.formato) + '</span><span>Ratio</span><span class="v">' + esc(p.ratio) + '</span>' +
+      '<span>Fecha</span><span class="v">' + esc(fechaFicha(p.fecha)) + '</span><span>Hora</span><span class="v">' + esc(p.hora ? p.hora + ' HS.' : '') + '</span>' +
+      '<span>Canal</span><span class="v">' + esc(p.canal) + '</span></div>' +
+      '<div class="f-pieza">Pieza: <span>' + esc(p.pieza) + '</span></div></div>' +
+    '<div class="f-copy-t">Copy:</div><div class="f-copy">' + esc(p.copy) + '</div>' +
+    '<div class="f-hash">' + esc(p.hashtags) + '</div>' +
+    '<div class="f-est-t">Estado</div><div class="f-est">' + ESTADOS.map(e =>
+      '<button data-post="' + p.id + '" data-est="' + e.id + '" class="' + (p.estado === e.id ? 'on' : '') + '"><i></i>' + e.txt + '</button>').join('') + '</div>' +
+    '<div class="f-acc"><button class="btn chico" data-editar="' + p.id + '">✎ Editar y comentar</button>' +
+      '<button class="btn chico" data-copiar="' + p.id + '">📋 Copiar copy</button>' +
+      (NCOM[p.id] ? '<span class="f-com" style="align-self:center">💬 ' + NCOM[p.id] + ' comentario' + (NCOM[p.id]===1?'':'s') + '</span>' : '') + '</div>' +
+    '</div><div class="der">' + derechaHTML(p) + '</div></div>' + pieSl() + '</div>';
+}
+
+$('pdp').addEventListener('click', ev => {
+  const t = ev.target;
+  const pil = t.closest('[data-pilar]'); if (pil){ FILTRO = 'pilar:' + pil.dataset.pilar; pintarPlan(); return; }
+  const ir = t.closest('[data-ir]'); if (ir){ const el = $('ficha-' + ir.dataset.ir); if (el) el.scrollIntoView({ behavior:'smooth', block:'start' }); return; }
+  const est = t.closest('[data-est]');
+  if (est){ const p = POSTS.find(x => x.id === est.dataset.post); cambiarEstado(p, p.estado === est.dataset.est ? 'sin_marcar' : est.dataset.est); return; }
+  const ed = t.closest('[data-editar]'); if (ed){ abrirPost(ed.dataset.editar); return; }
+  const cp = t.closest('[data-copiar]'); if (cp){ const p = POSTS.find(x => x.id === cp.dataset.copiar); copiar((p.copy||'').trim() + (p.hashtags ? '\n\n' + p.hashtags : '')); return; }
+  const v = t.closest('[data-ver]'); if (v) verImagen(v.dataset.ver);
+});
+
+async function cambiarEstado(p, est){
+  const ant = p.estado; p.estado = est; pintarPlan();
+  try{
+    const { error } = await supa.from('axo_mkt_posts').update({ estado: est, actualizado: new Date().toISOString(), actualizado_por: USUARIO }).eq('id', p.id);
+    if (error) throw error;
+    toast(est === 'sin_marcar' ? 'Estado desmarcado' : 'Estado: ' + estadoTxt(est));
+  }catch(e){ p.estado = ant; pintarPlan(); fallo(e, 'No se pudo cambiar el estado'); }
+}
+async function copiar(t){
+  try{ await navigator.clipboard.writeText(t); }
+  catch(e){ const ta = document.createElement('textarea'); ta.value = t; document.body.appendChild(ta); ta.select(); document.execCommand('copy'); ta.remove(); }
+  toast('Copiado, listo para pegar');
+}
+
+async function guardarPlanCampos(campos, msj){
+  try{
+    const { error } = await supa.from('axo_mkt_planes').update(Object.assign({}, campos, { actualizado: new Date().toISOString(), actualizado_por: USUARIO })).eq('id', PLAN.id);
+    if (error) throw error;
+    Object.assign(PLAN, campos); if (msj) toast(msj); return true;
+  }catch(e){ fallo(e, 'No se pudo guardar'); return false; }
+}
+async function borrarArchivos(lista){
+  const rutas = lista.map(i => i.p).filter(Boolean);
+  if (rutas.length) { try { await supa.storage.from(BUCKET).remove(rutas); } catch(e){ console.warn(e); } }
+}
+async function borrarPlan(){
+  if (!confirm('¿Borrar ' + nombreMes(PLAN.mes) + ' con sus ' + POSTS.length + ' publicaciones, imágenes y comentarios?\nNo se puede deshacer.')) return;
+  try{
+    const { error } = await supa.from('axo_mkt_planes').delete().eq('id', PLAN.id);
+    if (error) throw error;
+    await borrarArchivos(POSTS.flatMap(p => p.imagenes || []));
+    PLAN = null; toast('Mes borrado'); cargarPlanes(); mostrar('planes');
+  }catch(e){ fallo(e, 'No se pudo borrar'); }
+}
+
+// ── Portada y pilares ────────────────────────────────────────────
+function editarPlan(){
+  $('pe-sub').value = planSub(); $('pe-frec').value = planFrec();
+  $('pe-pilares').innerHTML = pilaresPlan().map((p,i) =>
+    '<div class="caja"><b style="color:#' + p.color + ';font-size:17px">' + esc(p.nombre) + '</b><div class="g3" style="margin-top:8px">' +
+    '<div><label class="b">%</label><input type="text" id="pe-pct-' + i + '" value="' + esc(p.pct) + '"></div>' +
+    '<div style="grid-column:span 2"><label class="b">Descripción</label><input type="text" id="pe-desc-' + i + '" value="' + esc(p.desc) + '"></div></div></div>').join('');
+  mostrar('planed');
+}
+async function guardarPlanEd(){
+  const dist = pilaresPlan().map((p,i) => ({ nombre:p.nombre, pct: $('pe-pct-'+i).value.trim(), desc: $('pe-desc-'+i).value.trim() }));
+  if (await guardarPlanCampos({ subtitulo: $('pe-sub').value.trim(), frecuencia: $('pe-frec').value.trim(), distribucion: dist }, 'Guardado')){ pintarPlan(); mostrar('plan'); }
+}
+
+// ── Historias semanales ──────────────────────────────────────────
+function pintarHistorias(){
+  const h = Array.isArray(PLAN.historias) ? PLAN.historias : [];
+  $('hist-tabla').innerHTML = '<tr><td><label class="b">Día</label></td><td><label class="b">Qué subir</label></td><td><label class="b">Sticker o recurso</label></td><td></td></tr>' +
+    (h.length ? '' : '<tr><td colspan="4" class="vacio" style="padding:14px">Sin historias cargadas.</td></tr>') +
+    h.map((x,i) => '<tr><td><input type="text" data-h="' + i + '" data-k="dia" value="' + esc(x.dia) + '"></td>' +
+      '<td><textarea data-h="' + i + '" data-k="que" style="min-height:44px">' + esc(x.que) + '</textarea></td>' +
+      '<td><input type="text" data-h="' + i + '" data-k="recurso" value="' + esc(x.recurso) + '"></td>' +
+      '<td><button class="btn chico peligro" style="padding:5px 9px" onclick="quitarHistoria(' + i + ')">✕</button></td></tr>').join('');
+}
+function leerHistorias(){ const h = (PLAN.historias || []).map(x => Object.assign({}, x)); document.querySelectorAll('#hist-tabla [data-h]').forEach(el => { h[+el.dataset.h][el.dataset.k] = el.value; }); return h; }
+function agregarHistoria(){ PLAN.historias = leerHistorias().concat([{ dia:'', que:'', recurso:'' }]); pintarHistorias(); }
+function quitarHistoria(i){ const h = leerHistorias(); h.splice(i,1); PLAN.historias = h; pintarHistorias(); }
+async function guardarHistorias(){ await guardarPlanCampos({ historias: leerHistorias() }, 'Historias guardadas'); }
+
+// ── Arreglos del perfil ──────────────────────────────────────────
+function pintarArreglos(){
+  const a = Array.isArray(PLAN.arreglos) ? PLAN.arreglos : [];
+  $('arreglos-lista').innerHTML = !a.length ? '<div class="vacio" style="padding:14px">Sin arreglos cargados.</div>' :
+    '<div style="font-size:13.5px;color:var(--gris)">' + a.filter(x => x.hecho).length + ' de ' + a.length + ' hechos</div>' +
+    a.map((x,i) => '<div class="check' + (x.hecho ? ' hecho' : '') + '"><input type="checkbox" ' + (x.hecho ? 'checked' : '') + ' onchange="tildarArreglo(' + i + ',this.checked)">' +
+      '<div style="flex:1"><b>' + esc(x.que) + '</b><span>' + esc(x.propuesta) + '</span>' + (x.hecho && x.por ? '<div style="font-size:12px;color:var(--gris)">✓ ' + esc(x.por) + '</div>' : '') + '</div>' +
+      '<button class="btn chico" style="padding:3px 8px;border:none;color:var(--gris)" onclick="quitarArreglo(' + i + ')">✕</button></div>').join('');
+}
+async function tildarArreglo(i, v){ const a = PLAN.arreglos.map(x => Object.assign({}, x)); a[i].hecho = v; a[i].por = v ? USUARIO + ' · ' + hoyTxt() : ''; await guardarPlanCampos({ arreglos: a }, v ? 'Marcado como hecho' : 'Desmarcado'); pintarArreglos(); }
+async function quitarArreglo(i){ if (!confirm('¿Quitar «' + PLAN.arreglos[i].que + '»?')) return; const a = PLAN.arreglos.slice(); a.splice(i,1); await guardarPlanCampos({ arreglos: a }, 'Arreglo quitado'); pintarArreglos(); }
+async function agregarArreglo(){
+  const que = $('arr-que').value.trim(); if (!que){ alert('Escribí qué hay que arreglar.'); return; }
+  await guardarPlanCampos({ arreglos: (PLAN.arreglos || []).concat([{ hecho:false, que, propuesta: $('arr-prop').value.trim() }]) }, 'Arreglo agregado');
+  $('arr-que').value = ''; $('arr-prop').value = ''; pintarArreglos();
+}
+
+// ── Editar publicación ───────────────────────────────────────────
+function opciones(sel, lista, v){ const l = lista.slice(); if (v && !l.some(x => norm(x) === norm(v))) l.push(v); sel.innerHTML = '<option value="">—</option>' + l.map(x => '<option' + (norm(x) === norm(v) ? ' selected' : '') + '>' + esc(x) + '</option>').join(''); }
+function abrirPost(id){
+  POST = POSTS.find(p => p.id === id); if (!POST) return;
+  $('post-titulo').textContent = 'Post ' + (POST.numero || '') + ' · ' + (POST.tema || 'Nueva publicación');
+  $('post-sub').textContent = fechaFicha(POST.fecha) + ' · Estado: ' + estadoTxt(POST.estado);
+  $('f-numero').value = POST.numero || ''; $('f-tema').value = POST.tema || ''; $('f-subtitulo').value = POST.subtitulo || '';
+  opciones($('f-pilar'), pilaresPlan().map(p => p.nombre), POST.pilar);
+  opciones($('f-formato'), FORMATOS, POST.formato); opciones($('f-ratio'), RATIOS, POST.ratio);
+  $('f-fecha').value = POST.fecha || ''; $('f-hora').value = POST.hora || ''; $('f-canal').value = POST.canal || '';
+  $('f-pieza').value = POST.pieza || ''; $('f-copy').value = POST.copy || ''; $('f-hashtags').value = POST.hashtags || '';
+  $('f-historias').value = POST.historias_dia || ''; $('f-guion').value = POST.guion || '';
+  $('f-slides').value = (POST.slides || []).join('\n---\n');
+  $('post-ultimo').textContent = POST.actualizado_por ? 'Último cambio: ' + POST.actualizado_por + ' · ' + new Date(POST.actualizado).toLocaleString('es-PY') : '';
+  pintarEdImgs(); $('coment-nuevo').value = '';
+  mostrar('post'); cargarComentarios();
+}
+function pintarEdImgs(){
+  $('ed-imgs').innerHTML = (POST.imagenes || []).map((i,n) => '<div><img src="' + esc(i.u) + '"><button onclick="quitarImagen(' + n + ')">✕</button></div>').join('') ||
+    '<span style="font-size:13px;color:var(--gris)">Sin imágenes.</span>';
+}
+async function guardarImagenes(lista, msj){
+  const { error } = await supa.from('axo_mkt_posts').update({ imagenes: lista, actualizado: new Date().toISOString(), actualizado_por: USUARIO }).eq('id', POST.id);
+  if (error) throw error;
+  POST.imagenes = lista; pintarEdImgs(); toast(msj);
+}
+async function quitarImagen(n){
+  if (!confirm('¿Quitar esta imagen?')) return;
+  const l = (POST.imagenes || []).slice(); const [q] = l.splice(n,1);
+  try{ await guardarImagenes(l, 'Imagen quitada'); await borrarArchivos([q]); }catch(e){ fallo(e, 'No se pudo quitar'); }
+}
+function comprimir(file, max){
+  return new Promise(res => {
+    if (!/^image\/(jpeg|png|webp)/.test(file.type)) { res(file); return; }
+    const img = new Image(), u = URL.createObjectURL(file);
+    img.onload = () => { let w = img.width, h = img.height; if (w <= max && h <= max && file.size < 900000){ URL.revokeObjectURL(u); res(file); return; }
+      const r = Math.min(1, max/w, max/h); w = Math.round(w*r); h = Math.round(h*r);
+      const cv = document.createElement('canvas'); cv.width = w; cv.height = h; const cx = cv.getContext('2d'); cx.fillStyle = '#fff'; cx.fillRect(0,0,w,h); cx.drawImage(img,0,0,w,h);
+      URL.revokeObjectURL(u); cv.toBlob(b => res(b || file), 'image/jpeg', 0.86); };
+    img.onerror = () => { URL.revokeObjectURL(u); res(file); };
+    img.src = u;
+  });
+}
+async function subirBlob(blob, ruta){
+  const { error } = await supa.storage.from(BUCKET).upload(ruta, blob, { contentType: blob.type || 'image/jpeg', upsert: true });
+  if (error) throw error;
+  return { u: supa.storage.from(BUCKET).getPublicUrl(ruta).data.publicUrl + '?v=' + Date.now(), p: ruta };
+}
+async function subirImagenes(input){
+  const files = Array.from(input.files || []); input.value = ''; if (!files.length) return;
+  toast('Subiendo ' + files.length + ' imagen(es)…');
+  try{
+    const nuevas = [];
+    for (const f of files){
+      const b = await comprimir(f, 1600);
+      const ext = b.type === 'image/png' ? 'png' : 'jpg';
+      nuevas.push(await subirBlob(b, PLAN.mes + '/post' + (POST.numero || 'x') + '_' + Date.now() + '_' + Math.random().toString(36).slice(2,6) + '.' + ext));
+    }
+    await guardarImagenes((POST.imagenes || []).concat(nuevas), 'Imágenes agregadas');
+  }catch(e){ fallo(e, 'No se pudo subir'); }
+}
+async function guardarPost(){
+  const campos = {
+    numero: parseInt($('f-numero').value, 10) || null, tema: $('f-tema').value.trim(), subtitulo: $('f-subtitulo').value.trim(),
+    pilar: $('f-pilar').value, formato: $('f-formato').value, ratio: $('f-ratio').value,
+    fecha: $('f-fecha').value || null, hora: $('f-hora').value.replace(/\s*hs\.?/i,'').trim(), canal: $('f-canal').value.trim(),
+    pieza: $('f-pieza').value.trim(), copy: $('f-copy').value.trim(), hashtags: $('f-hashtags').value.trim(),
+    historias_dia: $('f-historias').value.trim(), guion: $('f-guion').value.trim(),
+    slides: $('f-slides').value.split(/\n\s*---\s*\n/).map(s => s.trim()).filter(Boolean),
+    actualizado: new Date().toISOString(), actualizado_por: USUARIO
+  };
+  const btn = $('btn-guardar-post'); btn.disabled = true;
+  try{
+    const { error } = await supa.from('axo_mkt_posts').update(campos).eq('id', POST.id);
+    if (error) throw error;
+    Object.assign(POST, campos); ordenar(POSTS);
+    $('post-titulo').textContent = 'Post ' + (POST.numero || '') + ' · ' + (POST.tema || '');
+    toast('Guardado');
+  }catch(e){ fallo(e, 'No se pudo guardar'); }
+  btn.disabled = false;
+}
+async function nuevoPost(){
+  const ult = POSTS.reduce((m,p) => Math.max(m, p.numero||0), 0);
+  try{
+    const { data, error } = await supa.from('axo_mkt_posts').insert({
+      plan_id: PLAN.id, numero: ult + 1, fecha: PLAN.mes + '-01', hora:'19:30', canal:'Instagram + Facebook',
+      subtitulo:'Feed + Story', estado:'sin_marcar', actualizado_por: USUARIO }).select().single();
+    if (error) throw error;
+    POSTS.push(data); ordenar(POSTS); abrirPost(data.id);
+  }catch(e){ fallo(e, 'No se pudo agregar'); }
+}
+async function borrarPost(){
+  if (!confirm('¿Borrar «' + (POST.tema || 'esta publicación') + '» con sus imágenes y comentarios?')) return;
+  try{
+    const { error } = await supa.from('axo_mkt_posts').delete().eq('id', POST.id);
+    if (error) throw error;
+    await borrarArchivos(POST.imagenes || []);
+    POSTS = POSTS.filter(p => p.id !== POST.id); toast('Publicación borrada'); pintarPlan(); mostrar('plan');
+  }catch(e){ fallo(e, 'No se pudo borrar'); }
+}
+function copiarTexto(){ copiar($('f-copy').value.trim() + ($('f-hashtags').value.trim() ? '\n\n' + $('f-hashtags').value.trim() : '')); }
+
+// ── Comentarios ──────────────────────────────────────────────────
+async function cargarComentarios(){
+  const cont = $('coment-lista'); cont.innerHTML = '<div style="color:var(--gris);font-size:13.5px;margin-bottom:9px">Cargando…</div>';
+  try{
+    const { data, error } = await supa.from('axo_mkt_comentarios').select('*').eq('post_id', POST.id).order('creado');
+    if (error) throw error;
+    NCOM[POST.id] = (data||[]).length;
+    cont.innerHTML = (data||[]).length ? data.map(c => '<div class="coment"><div style="white-space:pre-wrap;font-size:14.5px">' + esc(c.texto) + '</div><div class="q">' + esc(c.autor||'') + ' · ' +
+      new Date(c.creado).toLocaleString('es-PY', { day:'2-digit', month:'2-digit', hour:'2-digit', minute:'2-digit' }) + '<button class="x" data-bc="' + c.id + '">borrar</button></div></div>').join('')
+      : '<div style="color:var(--gris);font-size:13.5px;margin-bottom:9px">Sin comentarios todavía.</div>';
+  }catch(e){ cont.innerHTML = '<div class="aviso mal">No se pudieron traer los comentarios.</div>'; }
+}
+$('coment-lista').addEventListener('click', async ev => {
+  const b = ev.target.closest('[data-bc]'); if (!b || !confirm('¿Borrar este comentario?')) return;
+  const { error } = await supa.from('axo_mkt_comentarios').delete().eq('id', b.dataset.bc);
+  if (error) return fallo(error, 'No se pudo borrar');
+  cargarComentarios();
+});
+async function comentar(){
+  const t = $('coment-nuevo').value.trim(); if (!t) return;
+  try{
+    const { error } = await supa.from('axo_mkt_comentarios').insert({ post_id: POST.id, texto: t, autor: USUARIO });
+    if (error) throw error;
+    $('coment-nuevo').value = '';
+    if ($('coment-ajuste').checked && POST.estado !== 'con_ajustes'){
+      const { error: e2 } = await supa.from('axo_mkt_posts').update({ estado:'con_ajustes', actualizado: new Date().toISOString(), actualizado_por: USUARIO }).eq('id', POST.id);
+      if (e2) throw e2;
+      POST.estado = 'con_ajustes'; $('post-sub').textContent = fechaFicha(POST.fecha) + ' · Estado: Con ajustes';
+      toast('Comentario enviado · Con ajustes');
+    } else toast('Comentario enviado');
+    cargarComentarios();
+  }catch(e){ fallo(e, 'No se pudo enviar'); }
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// IMPORTACIÓN
+// ═══════════════════════════════════════════════════════════════════
+const MAPA_ESTADO = { 'por hacer':'sin_marcar', 'pendiente':'sin_marcar', 'sin marcar':'sin_marcar', 'en proceso':'en_proceso', 'con ajustes':'con_ajustes',
+  'aprobado':'aprobado', 'programado':'publicado', 'publicado':'publicado', 'programado / publicado':'publicado', 'programado/publicado':'publicado' };
+const estadoDe = t => MAPA_ESTADO[norm(t)] || null;
+const pilarDe = v => (PILARES_BASE.find(b => norm(b.nombre) === norm(v)) || {}).nombre || v;
+
+async function elegirArchivo(input){
+  const f = input.files && input.files[0]; input.value = ''; if (!f) return;
+  const desdePlan = PANT === 'plan';
+  try{
+    let r;
+    if (/\.pptx$/i.test(f.name)) r = await leerPPTX(f);
+    else if (/\.xlsx?$/i.test(f.name)) r = await leerExcel(f);
+    else { alert('Solo PowerPoint (.pptx) o Excel (.xlsx).'); return; }
+    r.archivo = f.name; r.desdePlan = desdePlan;
+    if (!r.mes){ alert('No encontré de qué mes es el archivo.'); return; }
+    if (!r.posts.length){ alert('No encontré publicaciones en el archivo.'); return; }
+    if (desdePlan && PLAN && r.mes !== PLAN.mes && !confirm('El archivo es de ' + nombreMes(r.mes) + ', no de ' + nombreMes(PLAN.mes) + '. ¿Importarlo igual en ' + nombreMes(r.mes) + '?')) return;
+    IMPORT = r; await prepararVista();
+  }catch(e){ fallo(e, 'No se pudo leer el archivo'); }
+}
+
+// ── PowerPoint con el formato del PDP ────────────────────────────
+const EMU = 914400;
+async function leerPPTX(file){
+  const zip = await JSZip.loadAsync(file), P = new DOMParser();
+  const xml = async ruta => { const f = zip.file(ruta); return f ? P.parseFromString(await f.async('string'), 'application/xml') : null; };
+  const relsDe = async ruta => { const d = await xml(ruta.replace(/([^/]+)$/, '_rels/$1.rels')); const m = {}; if (d) Array.from(d.getElementsByTagName('Relationship')).forEach(r => m[r.getAttribute('Id')] = r.getAttribute('Target')); return m; };
+  const resolver = (base, t) => { if (t.charAt(0) === '/') return t.slice(1); const p = base.split('/'); p.pop(); t.split('/').forEach(s => { if (s === '..') p.pop(); else if (s !== '.') p.push(s); }); return p.join('/'); };
+  const pos = el => { const o = el.getElementsByTagName('a:off')[0], x = el.getElementsByTagName('a:ext')[0];
+    return o ? { x:+o.getAttribute('x')/EMU, y:+o.getAttribute('y')/EMU, w: x ? +x.getAttribute('cx')/EMU : 0, h: x ? +x.getAttribute('cy')/EMU : 0 } : { x:0, y:0, w:0, h:0 }; };
+
+  const pres = await xml('ppt/presentation.xml'), prels = await relsDe('ppt/presentation.xml');
+  const rutas = Array.from(pres.getElementsByTagName('p:sldId')).map(s => resolver('ppt/presentation.xml', prels[s.getAttribute('r:id')]));
+
+  const diapos = [];
+  for (const ruta of rutas){
+    const d = await xml(ruta); if (!d) continue;
+    const rels = await relsDe(ruta);
+    const formas = [], fotos = [];
+    Array.from(d.getElementsByTagName('p:sp')).forEach(sp => {
+      const texto = Array.from(sp.getElementsByTagName('a:p')).map(p => { let t = '';
+        Array.from(p.childNodes).forEach(n => { if (n.nodeName === 'a:r' || n.nodeName === 'a:fld'){ const at = n.getElementsByTagName('a:t')[0]; if (at) t += at.textContent; } else if (n.nodeName === 'a:br') t += '\n'; });
+        return t; }).join('\n').replace(/\u000b/g,'\n').replace(/ /g,' ').trim();
+      let relleno = null; const spPr = sp.getElementsByTagName('p:spPr')[0];
+      if (spPr){ const sf = Array.from(spPr.childNodes).find(n => n.nodeName === 'a:solidFill'); if (sf){ const c = sf.getElementsByTagName('a:srgbClr')[0]; relleno = c ? c.getAttribute('val').toUpperCase() : 'TEMA'; } }
+      formas.push(Object.assign({ texto, relleno }, pos(sp)));
+    });
+    Array.from(d.getElementsByTagName('p:pic')).forEach(pic => {
+      const b = pic.getElementsByTagName('a:blip')[0], id = b && b.getAttribute('r:embed');
+      if (id && rels[id]) fotos.push(Object.assign({ media: resolver(ruta, rels[id]) }, pos(pic)));
+    });
+    const tablas = Array.from(d.getElementsByTagName('a:tbl')).map(t => Array.from(t.getElementsByTagName('a:tr')).map(tr =>
+      Array.from(tr.getElementsByTagName('a:tc')).map(tc => Array.from(tc.getElementsByTagName('a:t')).map(x => x.textContent).join('').trim())));
+    diapos.push({ formas, fotos, tablas });
+  }
+
+  const RUIDO = ['axo construcciones','historias de cada semana','feed + story','estado','copy:','en proceso','con ajustes','aprobado','programado / publicado','reel · guion'];
+  const esRuido = t => !t || RUIDO.includes(norm(t)) || /^© ?\d{4}$/.test(t.trim());
+  let anio = null, mesN = null, subtitulo = null, frecuencia = null;
+  for (const f of diapos[0] ? diapos[0].formas : []){
+    const m = norm(f.texto).match(/(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|setiembre|octubre|noviembre|diciembre)\s+(\d{4})/);
+    if (m && !anio){ mesN = m[1] === 'setiembre' ? 9 : MESES.indexOf(m[1]) + 1; anio = +m[2]; }
+    else if (/^instagram|^@/i.test(f.texto)) subtitulo = f.texto;
+  }
+  if (!anio) for (const f of diapos.flatMap(d => d.formas)){
+    const m = norm(f.texto).match(/(enero|febrero|marzo|abril|mayo|junio|julio|agosto|septiembre|octubre|noviembre|diciembre)\s+(\d{4})/);
+    if (m){ mesN = MESES.indexOf(m[1]) + 1; anio = +m[2]; break; }
+  }
+
+  const distribucion = [];
+  diapos.forEach(({ formas: fs }) => {
+    const iPC = fs.findIndex(f => norm(f.texto) === 'plan de contenidos');
+    if (iPC >= 0 && fs[iPC+1] && !frecuencia) frecuencia = fs[iPC+1].texto;
+    fs.forEach((f,i) => {
+      const base = PILARES_BASE.find(b => norm(b.nombre) === norm(f.texto));
+      if (!base || distribucion.some(x => x.nombre === base.nombre)) return;
+      const pct = fs[i+1] && /^(\d+)\s*%$/.exec(fs[i+1].texto.trim()); if (!pct) return;
+      const np = fs[i+3] && /(\d+)\s*posts?/i.exec(fs[i+3].texto);
+      distribucion.push({ nombre: base.nombre, pct: +pct[1], desc: fs[i+2] ? fs[i+2].texto : '', posts: np ? +np[1] : null });
+    });
+  });
+
+  let historias = null;
+  diapos.forEach(({ tablas }) => (tablas || []).forEach(t => {
+    const H = (t[0] || []).map(norm), cd = H.indexOf('dia'), cq = H.indexOf('que subir'), cr = H.findIndex(h => h === 'recurso' || h.indexOf('sticker') === 0);
+    if (cd >= 0 && cq >= 0) historias = t.slice(1).filter(f => f[cd] || f[cq]).map(f => ({ dia: f[cd] || '', que: f[cq] || '', recurso: cr >= 0 ? f[cr] || '' : '' }));
+  }));
+  const posts = [];
+  for (const { formas: fs, fotos } of diapos){
+    const iT = fs.findIndex(f => /^post\s+\d+\s*·/i.test(f.texto));
+    if (iT < 0) continue;
+    const usados = new Set([iT]);
+    const mT = /^post\s+(\d+)\s*·\s*([\s\S]+)$/i.exec(fs[iT].texto);
+    const p = { numero: +mT[1], tema: mT[2].trim(), slides: [] };
+    if (fs[iT+1] && fs[iT+1].texto && fs[iT+1].texto.length < 40 && !/^pilar/i.test(fs[iT+1].texto)){ p.subtitulo = fs[iT+1].texto; usados.add(iT+1); }
+    const iL = fs.findIndex(f => /^pilar\n/i.test(f.texto));
+    if (iL >= 0 && fs[iL+1]){
+      usados.add(iL); usados.add(iL+1);
+      const et = fs[iL].texto.split('\n').map(norm), va = fs[iL+1].texto.split('\n').map(s => s.trim());
+      et.forEach((k,j) => { const v = va[j] || '';
+        if (k === 'pilar') p.pilar = pilarDe(v);
+        else if (k === 'formato') p.formato = v; else if (k === 'ratio') p.ratio = v; else if (k === 'canal') p.canal = v;
+        else if (k === 'hora') p.hora = (v.match(/\d{1,2}:\d{2}/) || [v])[0];
+        else if (k === 'fecha'){ const md = v.match(/(\d{1,2})\/(\d{1,2})(?:\/(\d{2,4}))?/);
+          if (md){ let a = md[3] ? (+md[3] < 100 ? 2000 + +md[3] : +md[3]) : anio; if (!md[3] && mesN === 12 && +md[2] === 1) a = anio + 1; if (a) p.fecha = iso(a, +md[2], +md[1]); } }
+      });
+    }
+    fs.forEach((f,i) => {
+      if (/^pieza:/i.test(f.texto)){ p.pieza = f.texto.replace(/^pieza:\s*/i,'').trim(); usados.add(i); }
+      else if (norm(f.texto) === 'copy:' && fs[i+1]){ p.copy = fs[i+1].texto; usados.add(i); usados.add(i+1); }
+      else if (/^#\S/.test(f.texto) && !p.hashtags){ p.hashtags = f.texto; usados.add(i); }
+      else if (norm(f.texto) === 'reel · guion' && fs[i+1]){ p.guion = fs[i+1].texto; usados.add(i); usados.add(i+1); }
+    });
+    // Casillero tildado: el círculo con relleno que no es blanco
+    ['En proceso','Con ajustes','Aprobado','Programado / Publicado'].forEach(et => {
+      const i = fs.findIndex(f => norm(f.texto) === norm(et));
+      if (i > 0 && !fs[i-1].texto && fs[i-1].relleno && fs[i-1].relleno !== 'FFFFFF') p.estado = estadoDe(et);
+    });
+    // Textos de las slides del carrusel (lado derecho de la ficha)
+    p.slides = fs.filter((f,i) => !usados.has(i) && !esRuido(f.texto) && f.x >= 5.2).sort((a,b) => (Math.round(a.y*2) - Math.round(b.y*2)) || (a.x - b.x)).map(f => f.texto);
+    // Imágenes de la pieza, en el orden en que se ven
+    p._fotos = [];
+    for (const ft of fotos.filter(f => f.x >= 5.2).sort((a,b) => (Math.round(a.y*4) - Math.round(b.y*4)) || (a.x - b.x))){
+      const zf = zip.file(ft.media); if (!zf) continue;
+      const ext = (ft.media.split('.').pop() || 'jpg').toLowerCase();
+      p._fotos.push({ blob: new Blob([await zf.async('uint8array')], { type: ext === 'png' ? 'image/png' : 'image/jpeg' }), ext: ext === 'jpeg' ? 'jpg' : ext });
+    }
+    posts.push(p);
+  }
+  const mes = anio && mesN ? anio + '-' + String(mesN).padStart(2,'0') : mesDePosts(posts);
+  return { tipo:'PowerPoint', mes, subtitulo, frecuencia, distribucion, historias, arreglos:null, posts };
+}
+function mesDePosts(posts){ const c = {}; posts.forEach(p => { if (p.fecha){ const k = p.fecha.slice(0,7); c[k] = (c[k]||0)+1; } }); return Object.keys(c).sort((a,b) => c[b]-c[a])[0] || null; }
+
+// ── Excel con el formato del plan ────────────────────────────────
+async function leerExcel(file){
+  const wb = XLSX.read(await file.arrayBuffer(), { type:'array' });
+  let posts = [], historias = null, arreglos = null;
+  const valFecha = v => {
+    if (v == null || v === '') return null;
+    if (typeof v === 'number'){ const d = new Date(Math.round((v - 25569) * 864e5)); return iso(d.getUTCFullYear(), d.getUTCMonth()+1, d.getUTCDate()); }
+    const s = String(v).trim(); let m = s.match(/^(\d{4})-(\d{1,2})-(\d{1,2})/); if (m) return iso(+m[1], +m[2], +m[3]);
+    m = s.match(/(\d{1,2})\/(\d{1,2})\/(\d{2,4})/); return m ? iso(+m[3] < 100 ? 2000 + +m[3] : +m[3], +m[2], +m[1]) : null;
+  };
+  wb.SheetNames.forEach(nombre => {
+    const filas = XLSX.utils.sheet_to_json(wb.Sheets[nombre], { header:1, raw:true, defval:'' });
+    const iH = filas.findIndex(f => f.some(c => norm(c) === 'fecha') && f.some(c => ['tema','texto para copiar'].includes(norm(c))));
+    if (iH >= 0){
+      const H = filas[iH].map(norm), col = (...ns) => H.findIndex(h => ns.includes(h));
+      const C = { fecha: col('fecha'), pilar: col('tipo','pilar'), formato: col('formato'), tema: col('tema'), estado: col('estado'),
+        pieza: col('que mostrar / grabar','que mostrar','pieza'), copy: col('texto para copiar','copy'), hashtags: col('hashtags'),
+        historias_dia: col('historias de ese dia','historias'), hora: col('hora'), canal: col('canal'), ratio: col('ratio'), guion: col('guion') };
+      filas.slice(iH+1).forEach(f => {
+        const g = k => C[k] >= 0 ? String(f[C[k]] == null ? '' : f[C[k]]).trim() : '';
+        const fecha = C.fecha >= 0 ? valFecha(f[C.fecha]) : null;
+        if (!fecha && !g('tema')) return;
+        const p = { fecha, tema: g('tema') };
+        ['formato','pieza','copy','hashtags','historias_dia','canal','ratio','guion'].forEach(k => { if (g(k)) p[k] = g(k); });
+        if (g('pilar')) p.pilar = pilarDe(g('pilar'));
+        if (g('hora')){ const h = f[C.hora]; p.hora = typeof h === 'number' ? String(Math.floor(h*24)).padStart(2,'0') + ':' + String(Math.round(h*1440)%60).padStart(2,'0') : g('hora').replace(/\s*hs\.?/i,''); }
+        if (g('estado')) p.estado = estadoDe(g('estado'));
+        posts.push(p);
+      });
+      return;
+    }
+    const iHi = filas.findIndex(f => f.some(c => norm(c) === 'dia') && f.some(c => norm(c) === 'que subir'));
+    if (iHi >= 0){
+      const H = filas[iHi].map(norm), cd = H.indexOf('dia'), cq = H.indexOf('que subir'), cr = H.findIndex(h => h.indexOf('sticker') === 0 || h === 'recurso');
+      historias = filas.slice(iHi+1).filter(f => String(f[cd]||'').trim() || String(f[cq]||'').trim())
+        .map(f => ({ dia: String(f[cd]||'').trim(), que: String(f[cq]||'').trim(), recurso: cr >= 0 ? String(f[cr]||'').trim() : '' }));
+      return;
+    }
+    const iA = filas.findIndex(f => f.some(c => norm(c) === 'que arreglar'));
+    if (iA >= 0){
+      const H = filas[iA].map(norm), ch = H.indexOf('hecho'), cq = H.indexOf('que arreglar'), cp = H.indexOf('propuesta');
+      arreglos = filas.slice(iA+1).filter(f => String(f[cq]||'').trim()).map(f => { const h = ch >= 0 ? norm(f[ch]) : '';
+        return { hecho: !!h && !['no','false','0','-'].includes(h), que: String(f[cq]).trim(), propuesta: cp >= 0 ? String(f[cp]||'').trim() : '' }; });
+    }
+  });
+  posts.sort((a,b) => (a.fecha||'').localeCompare(b.fecha||'')).forEach((p,i) => p.numero = i+1);
+  return { tipo:'Excel', mes: mesDePosts(posts), distribucion:null, historias, arreglos, posts };
+}
+
+// ── Vista previa: qué se crea y qué se actualiza ─────────────────
+async function prepararVista(){
+  const r = IMPORT;
+  const { data: pl, error } = await supa.from('axo_mkt_planes').select('*').eq('mes', r.mes).maybeSingle();
+  if (error) throw error;
+  let ex = [];
+  if (pl){ const { data: ps, error: e2 } = await supa.from('axo_mkt_posts').select('*').eq('plan_id', pl.id); if (e2) throw e2; ex = ps || []; }
+  r.plan = pl;
+  const libres = ex.slice();
+  r.posts.forEach(p => {
+    // Se empareja por fecha; si ese día hay más de uno, por número o tema
+    let c = libres.filter(e => p.fecha && e.fecha === p.fecha);
+    if (c.length > 1){ const fino = c.filter(e => (p.numero && e.numero === p.numero) || norm(e.tema) === norm(p.tema)); if (fino.length) c = fino; }
+    if (!c.length) c = libres.filter(e => norm(e.tema) && norm(e.tema) === norm(p.tema));
+    p._match = c[0] || null; if (p._match) libres.splice(libres.indexOf(p._match), 1);
+  });
+  const nuevos = r.posts.filter(p => !p._match).length, act = r.posts.length - nuevos, nfotos = r.posts.reduce((s,p) => s + (p._fotos ? p._fotos.length : 0), 0);
+  $('imp-archivo').textContent = r.tipo + ' · ' + r.archivo;
+  $('imp-progreso').textContent = '';
+  $('imp-cuerpo').innerHTML =
+    '<div class="aviso ' + (pl ? 'info' : 'ok') + '">' + (pl ? '<b>' + nombreMes(r.mes) + ' ya existe.</b> Se actualiza con lo que trae el archivo. Los estados ya marcados y los comentarios del equipo no se tocan.'
+      : '<b>Se crea el plan de ' + nombreMes(r.mes) + '.</b>') + '</div>' +
+    '<div class="caja"><b>' + r.posts.length + ' publicaciones en el archivo</b><ul class="lista-import">' +
+      (nuevos ? '<li>' + nuevos + ' nuevas</li>' : '') + (act ? '<li>' + act + ' se actualizan</li>' : '') +
+      (nfotos ? '<li>' + nfotos + ' imágenes de piezas</li>' : '') +
+      (r.distribucion && r.distribucion.length ? '<li>Pilares: ' + r.distribucion.map(d => esc(d.nombre) + ' ' + d.pct + '%').join(' · ') + '</li>' : '') +
+      (r.historias ? '<li>Historias semanales: ' + r.historias.length + ' días</li>' : '') + (r.arreglos ? '<li>Arreglos del perfil: ' + r.arreglos.length + '</li>' : '') +
+    '</ul></div>' +
+    (pl && act ? '<label class="caja" style="display:flex;gap:10px;align-items:flex-start;cursor:pointer"><input type="checkbox" id="imp-reemplazar" ' + (r.tipo === 'PowerPoint' ? 'checked' : '') +
+      ' style="width:20px;height:20px;accent-color:var(--verde);flex:none;margin-top:1px"><span style="font-size:14.5px"><b>Reemplazar lo que ya está cargado con lo del archivo</b><br>' +
+      '<span style="color:var(--gris)">Sin tildar: el archivo solo completa los campos que están vacíos y no cambia nada de lo que ya está.</span></span></label>' : '') +
+    '<div class="caja">' + r.posts.map(p =>
+      '<div style="display:flex;gap:10px;align-items:center;padding:7px 0;border-bottom:1px solid #EEEBE2">' +
+      '<span style="width:6px;height:34px;border-radius:3px;background:#' + (PILARES_BASE.find(b => b.nombre === p.pilar) || { color:'C9C4B5' }).color + '"></span>' +
+      '<span style="flex:1;min-width:0"><b style="font-size:15px">Post ' + esc(p.numero) + ' · ' + esc(p.tema || 'Sin tema') + '</b><br><span style="font-size:13px;color:var(--gris)">' +
+      esc(fechaFicha(p.fecha) || 'Sin fecha') + (p.pilar ? ' · ' + esc(p.pilar) : '') + (p.formato ? ' · ' + esc(p.formato) : '') + (p._fotos && p._fotos.length ? ' · 🖼️ ' + p._fotos.length : '') + '</span></span>' +
+      '<b style="font-size:12.5px;color:' + (p._match ? '#22507A' : '#2E5A26') + '">' + (p._match ? 'Actualiza' : 'Nueva') + '</b></div>').join('') + '</div>';
+  mostrar('import');
+}
+
+const CAMPOS_POST = ['numero','tema','subtitulo','pilar','formato','ratio','fecha','hora','canal','pieza','copy','hashtags','guion','historias_dia'];
+async function confirmarImport(){
+  const r = IMPORT, btn = $('btn-imp-ok'), prog = $('imp-progreso');
+  btn.disabled = true; btn.textContent = 'Importando…';
+  try{
+    const ahora = new Date().toISOString();
+    let plan = r.plan;
+    if (!plan){
+      const { data, error } = await supa.from('axo_mkt_planes').insert({
+        mes: r.mes, subtitulo: r.subtitulo || 'Instagram @axo.py', frecuencia: r.frecuencia || FREC_BASE,
+        distribucion: (r.distribucion && r.distribucion.length) ? r.distribucion : PILARES_BASE.map(p => ({ nombre:p.nombre, pct:p.pct, desc:p.desc })),
+        historias: r.historias || [], arreglos: r.arreglos || [], actualizado_por: USUARIO }).select().single();
+      if (error) throw error; plan = data;
+    } else {
+      const c = { actualizado: ahora, actualizado_por: USUARIO };
+      const rp = !$('imp-reemplazar') || $('imp-reemplazar').checked, vac = v => !v || (Array.isArray(v) && !v.length);
+      if (r.subtitulo && (rp || vac(plan.subtitulo))) c.subtitulo = r.subtitulo;
+      if (r.frecuencia && (rp || vac(plan.frecuencia))) c.frecuencia = r.frecuencia;
+      if (r.distribucion && r.distribucion.length && (rp || vac(plan.distribucion))) c.distribucion = r.distribucion;
+      if (r.historias && r.historias.length && (rp || vac(plan.historias))) c.historias = r.historias;
+      if (r.arreglos && r.arreglos.length){
+        const prev = plan.arreglos || [];
+        c.arreglos = r.arreglos.map(a => { const v = prev.find(x => norm(x.que) === norm(a.que)); return v && v.hecho ? Object.assign({}, a, { hecho:true, por:v.por }) : a; })
+          .concat(prev.filter(x => !r.arreglos.some(a => norm(a.que) === norm(x.que))));
+      }
+      const { error } = await supa.from('axo_mkt_planes').update(c).eq('id', plan.id); if (error) throw error;
+    }
+    const reemplazar = !$('imp-reemplazar') || $('imp-reemplazar').checked;
+    const vacio = v => v == null || v === '' || (Array.isArray(v) && !v.length);
+    let n = 0;
+    for (const p of r.posts){
+      const quedan = p._match && !reemplazar ? k => vacio(p._match[k]) : () => true;
+      n++; prog.textContent = 'Publicación ' + n + ' de ' + r.posts.length + '…';
+      const datos = {};
+      CAMPOS_POST.forEach(k => { if (p[k] != null && p[k] !== '' && quedan(k)) datos[k] = p[k]; });
+      if (p.slides && p.slides.length && quedan('slides')) datos.slides = p.slides;
+      if (p._fotos && p._fotos.length && quedan('imagenes')){
+        const imgs = [];
+        for (let i = 0; i < p._fotos.length; i++){
+          const b = await comprimir(p._fotos[i].blob, 1600);
+          imgs.push(await subirBlob(b, r.mes + '/post' + (p.numero || n) + '_' + (i+1) + '.' + (b.type === 'image/png' ? 'png' : 'jpg')));
+        }
+        datos.imagenes = imgs;
+      }
+      if (p._match){
+        if (p.estado && p._match.estado === 'sin_marcar') datos.estado = p.estado;
+        datos.actualizado = ahora; datos.actualizado_por = USUARIO;
+        const { error } = await supa.from('axo_mkt_posts').update(datos).eq('id', p._match.id); if (error) throw error;
+      } else {
+        const { error } = await supa.from('axo_mkt_posts').insert(Object.assign({ plan_id: plan.id, estado: p.estado || 'sin_marcar', actualizado_por: USUARIO }, datos)); if (error) throw error;
+      }
+    }
+    toast('Importado: ' + r.posts.length + ' publicaciones'); IMPORT = null;
+    await abrirPlan(plan.id);
+  }catch(e){ fallo(e, 'No se pudo importar'); }
+  btn.disabled = false; btn.textContent = 'Confirmar e importar'; prog.textContent = '';
+}
+
+// ═══════════════════════════════════════════════════════════════════
+// BAJAR PPT — mismo formato del PDP (16:9, medidas, colores y Calibri)
+// ═══════════════════════════════════════════════════════════════════
+async function aDataURL(u){
+  const r = await fetch(u); if (!r.ok) throw new Error('imagen'); const b = await r.blob();
+  return await new Promise(res => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.readAsDataURL(b); });
+}
+async function bajarPPT(){
+  const btn = $('btn-ppt'); btn.disabled = true; btn.textContent = 'Armando PPT…';
+  try{
+    const pres = new PptxGenJS(); pres.layout = 'LAYOUT_16x9'; pres.title = 'Plan de contenidos ' + nombreMes(PLAN.mes);
+    const F = 'Calibri', anio = PLAN.mes.slice(0,4), m = +PLAN.mes.slice(5,7);
+    const pie = (s, color) => {
+      s.addText([{ text:'AXO ', options:{ bold:true } }, { text:'Construcciones' }], { x:0.5, y:5.28, w:3, h:0.22, fontFace:F, fontSize:7, color, margin:0 });
+      s.addText('© ' + anio, { x:8.5, y:5.28, w:1, h:0.22, fontFace:F, fontSize:7, color, align:'right', margin:0 });
+    };
+    // Logo
+    let logo = null; try { logo = await aDataURL('logo.png'); } catch(e){}
+    // Imágenes de las piezas
+    const cache = {};
+    for (const p of POSTS) for (const i of (p.imagenes || []).slice(0,4)) { try { cache[i.u] = await aDataURL(i.u); } catch(e){ console.warn('img', e); } }
+
+    // 1 · Portada
+    let s = pres.addSlide(); s.background = { color:'3E4938' };
+    s.addText([{ text:'PLAN DE', options:{ breakLine:true } }, { text:'CONTENIDOS', options:{ breakLine:true } },
+               { text: MESES[m-1].charAt(0).toUpperCase() + MESES[m-1].slice(1) + ' ' + anio, options:{ color:'EA733D' } }],
+      { x:0.7, y:1.6, w:5, h:2, fontFace:F, fontSize:34, bold:true, color:'FFFFFF', valign:'middle', margin:0 });
+    s.addText(planSub(), { x:0.7, y:3.7, w:5, h:0.35, fontFace:F, fontSize:13, color:'C1B2A2', margin:0 });
+    if (logo) s.addImage({ data: logo, x:6.1, y:1.15, w:3.2, h:3.2 });
+    pie(s, 'C1B2A2');
+
+    // 2 · Plan de contenidos
+    s = pres.addSlide(); s.background = { color:'FFFFFF' };
+    s.addText('Plan de contenidos', { x:0.5, y:0.4, w:9, h:0.6, fontFace:F, fontSize:30, bold:true, color:'3E4938', margin:0 });
+    s.addText(planFrec(), { x:0.5, y:1.0, w:9, h:0.35, fontFace:F, fontSize:13, color:'6B6B6B', margin:0 });
+    pilaresPlan().slice(0,4).forEach((p,i) => {
+      const x = 0.5 + i*2.3, n = POSTS.filter(q => norm(q.pilar) === norm(p.nombre)).length;
+      s.addShape(pres.ShapeType.roundRect, { x, y:1.7, w:2.1, h:3.2, fill:{ color:'EDE7E0' }, line:{ color:'EDE7E0' }, rectRadius:0.12 });
+      s.addShape(pres.ShapeType.ellipse, { x:x+0.2, y:1.9, w:0.32, h:0.32, fill:{ color:p.color }, line:{ color:p.color } });
+      s.addText(p.nombre, { x:x+0.2, y:2.35, w:1.8, h:0.4, fontFace:F, fontSize:17, bold:true, color:'2B2B2B', margin:0 });
+      s.addText(String(p.pct) + '%', { x:x+0.2, y:2.8, w:1.8, h:0.6, fontFace:F, fontSize:32, bold:true, color:p.color, margin:0 });
+      s.addText(p.desc || '', { x:x+0.2, y:3.45, w:1.75, h:0.95, fontFace:F, fontSize:11, color:'2B2B2B', valign:'top', margin:0 });
+      s.addText(n + ' post' + (n===1?'':'s') + ' este mes', { x:x+0.2, y:4.45, w:1.8, h:0.3, fontFace:F, fontSize:10, color:'6B6B6B', margin:0 });
+    });
+    pie(s, '6B6B6B');
+
+    // 3 · Grilla
+    s = pres.addSlide(); s.background = { color:'FFFFFF' };
+    s.addText('Grilla', { x:0.5, y:0.35, w:3, h:0.5, fontFace:F, fontSize:26, bold:true, color:'3E4938', margin:0 });
+    s.addText('Así se va a ver el perfil a fin de mes (lo más nuevo arriba a la izquierda).', { x:0.5, y:0.85, w:3.6, h:0.6, fontFace:F, fontSize:11, color:'6B6B6B', valign:'top', margin:0 });
+    pilaresPlan().slice(0,4).forEach((p,i) => {
+      s.addShape(pres.ShapeType.ellipse, { x:0.5, y:2.0 + i*0.38, w:0.2, h:0.2, fill:{ color:p.color }, line:{ color:p.color } });
+      s.addText(p.nombre, { x:0.8, y:1.96 + i*0.38, w:2.5, h:0.28, fontFace:F, fontSize:12, color:'2B2B2B', margin:0 });
+    });
+    s.addText('Los cuadros de color son piezas por diseñar o grabar.', { x:0.5, y:3.7, w:3.6, h:0.5, fontFace:F, fontSize:10, color:'6B6B6B', valign:'top', margin:0 });
+    const inv = POSTS.filter(p => p.fecha).slice().reverse();
+    const filas = Math.max(1, Math.ceil(inv.length / 3));
+    const ch = Math.min(1.19, (4.88 - (filas-1)*0.04) / filas), cw = ch * 0.8, gx = cw + 0.04, gy = ch + 0.04;
+    inv.forEach((p,i) => {
+      const x = 5.6 + (i % 3) * gx, y = 0.3 + Math.floor(i / 3) * gy, img = (p.imagenes||[])[0];
+      if (img && cache[img.u]) s.addImage({ data: cache[img.u], x, y, w:cw, h:ch, sizing:{ type:'cover', w:cw, h:ch } });
+      else {
+        s.addShape(pres.ShapeType.rect, { x, y, w:cw, h:ch, fill:{ color: colorPilar(p.pilar) }, line:{ color: colorPilar(p.pilar) } });
+        s.addText(p.tema || '', { x:x+0.06, y:y+0.1, w:cw-0.12, h:ch*0.7, fontFace:F, fontSize:8, bold:true, color:'FFFFFF', valign:'top', margin:0 });
+      }
+      s.addText(ddmm(p.fecha), { x:x+0.04, y:y+ch-0.22, w:0.5, h:0.18, fontFace:F, fontSize:7, bold:true, color:'FFFFFF', fill:{ color:'000000' }, align:'center', margin:0 });
+    });
+    pie(s, '6B6B6B');
+
+    // 4 · Semanas y fichas
+    let semAnt = null;
+    for (const p of POSTS){
+      const sem = p.fecha ? semanaDe(p.fecha) : 0;
+      if (sem !== semAnt){
+        s = pres.addSlide(); s.background = { color:'EA733D' };
+        s.addText(p.fecha ? 'SEMANA ' + sem : 'SIN FECHA', { x:0.5, y:2.0, w:9, h:0.9, fontFace:F, fontSize:40, bold:true, color:'FFFFFF', margin:0 });
+        if (p.fecha) s.addText(rangoSemana(p.fecha), { x:0.5, y:2.9, w:9, h:0.45, fontFace:F, fontSize:16, color:'FFFFFF', margin:0 });
+        pie(s, 'C1B2A2'); semAnt = sem;
+      }
+      pie(fichaPPT(pres, p, cache, F), '6B6B6B');
+    }
+    // Última · Historias de cada semana (tabla, como en el PDP)
+    const hs = (PLAN.historias || []).filter(x => x.dia || x.que);
+    if (hs.length){
+      s = pres.addSlide(); s.background = { color:'FFFFFF' };
+      s.addText('Historias de cada semana', { x:0.5, y:0.35, w:9, h:0.55, fontFace:F, fontSize:26, bold:true, color:'3E4938', margin:0 });
+      const borde = { type:'solid', pt:0.5, color:'C1B2A2' };
+      const cel = (t, o) => ({ text: t || '', options: Object.assign({ fontFace:F, fontSize:11, color:'2B2B2B', valign:'middle', border:[borde,borde,borde,borde] }, o) });
+      const filasT = [[cel('Día',{ bold:true, color:'FFFFFF', fill:{ color:'3E4938' } }), cel('Qué subir',{ bold:true, color:'FFFFFF', fill:{ color:'3E4938' } }), cel('Recurso',{ bold:true, color:'FFFFFF', fill:{ color:'3E4938' } })]]
+        .concat(hs.map((x,i) => { const f = { fill:{ color: i % 2 ? 'FFFFFF' : 'EDE7E0' } };
+          return [cel(x.dia, Object.assign({ bold:true }, f)), cel(x.que, f), cel(x.recurso, f)]; }));
+      s.addTable(filasT, { x:0.5, y:1.05, w:9, colW:[1.3,5.4,2.3], rowH:Math.min(0.42, 3.9 / filasT.length), margin:0.06 });
+      pie(s, '6B6B6B');
+    }
+    await pres.writeFile({ fileName: 'AXO_PDP_Instagram_' + MESES[m-1].charAt(0).toUpperCase() + MESES[m-1].slice(1) + '_' + anio + '.pptx' });
+    toast('PPT descargado');
+  }catch(e){ fallo(e, 'No se pudo armar el PPT'); }
+  btn.disabled = false; btn.textContent = '⬇ Bajar PPT';
+}
+function fichaPPT(pres, p, cache, F){
+  const s = pres.addSlide(); s.background = { color:'FFFFFF' };
+  const c = colorPilar(p.pilar);
+  s.addText('Post ' + (p.numero || '') + ' · ' + (p.tema || ''), { x:0.5, y:0.3, w:4.6, h:0.4, fontFace:F, fontSize:15, bold:true, color:'EA733D', margin:0 });
+  s.addText(p.subtitulo || 'Feed + Story', { x:0.5, y:0.68, w:4.6, h:0.25, fontFace:F, fontSize:11, italic:true, color:'2B2B2B', margin:0 });
+  s.addShape(pres.ShapeType.roundRect, { x:0.5, y:1.02, w:2.2, h:1.1, fill:{ color:'FFFFFF' }, line:{ color:'3E4938', width:1 }, rectRadius:0.08 });
+  s.addText('Pilar\nFormato\nRatio\nFecha\nHora\nCanal', { x:0.62, y:1.08, w:0.75, h:1.0, fontFace:F, fontSize:8.5, bold:true, color:'2B2B2B', valign:'middle', margin:0 });
+  s.addText([
+    { text: p.pilar || ' ', options:{ color:c, breakLine:true } }, { text: p.formato || ' ', options:{ breakLine:true } },
+    { text: p.ratio || ' ', options:{ breakLine:true } }, { text: fechaFicha(p.fecha) || ' ', options:{ breakLine:true } },
+    { text: p.hora ? p.hora + ' HS.' : ' ', options:{ breakLine:true } }, { text: p.canal || ' ' }
+  ], { x:1.3, y:1.08, w:1.3, h:1.0, fontFace:F, fontSize:8.5, bold:true, color:'2B2B2B', align:'right', valign:'middle', margin:0 });
+  s.addText([{ text:'Pieza: ', options:{ bold:true } }, { text: p.pieza || '', options:{ bold:false } }],
+    { x:2.9, y:1.02, w:2.2, h:1.1, fontFace:F, fontSize:8.5, color:'2B2B2B', valign:'top', margin:0, fit:'shrink' });
+  s.addText('Copy:', { x:0.5, y:2.25, w:2, h:0.2, fontFace:F, fontSize:9, bold:true, color:'2B2B2B', margin:0 });
+  s.addText(p.copy || '', { x:0.5, y:2.47, w:4.6, h:1.95, fontFace:F, fontSize:8.5, color:'2B2B2B', valign:'top', margin:0, fit:'shrink' });
+  s.addText(p.hashtags || '', { x:0.5, y:4.43, w:4.6, h:0.3, fontFace:F, fontSize:7.5, color:'3E4938', valign:'top', margin:0 });
+  s.addText('Estado', { x:0.5, y:4.78, w:1, h:0.22, fontFace:F, fontSize:10, bold:true, color:'2B2B2B', margin:0 });
+  [[0.5,0.69,0.75],[1.45,1.64,0.75],[2.4,2.59,0.75],[3.3,3.49,1.5]].forEach(([cx,tx,tw],i) => {
+    const on = p.estado === ESTADOS[i].id;
+    s.addShape(pres.ShapeType.ellipse, { x:cx, y:5.05, w:0.14, h:0.14, fill:{ color: on ? '2B2B2B' : 'FFFFFF' }, line:{ color:'2B2B2B', width:0.75 } });
+    s.addText(ESTADOS[i].txt, { x:tx, y:5.02, w:tw, h:0.2, fontFace:F, fontSize:7.5, bold:on, color:'2B2B2B', margin:0 });
+  });
+  // Lado derecho, igual que el PDP
+  const imgs = (p.imagenes || []).filter(i => cache[i.u]).slice(0,4);
+  const sl = p.slides || [];
+  if (imgs.length === 1){
+    s.addImage({ data: cache[imgs[0].u], x:5.53, y:0.35, w:3.84, h:4.8, sizing:{ type:'contain', w:3.84, h:4.8 } });
+  } else if (imgs.length){
+    const P4 = [[5.52,0.35],[7.49,0.35],[5.52,2.79],[7.49,2.79]];
+    imgs.forEach((i,k) => s.addImage({ data: cache[i.u], x:P4[k][0], y:P4[k][1], w:1.89, h:2.36, sizing:{ type:'cover', w:1.89, h:2.36 } }));
+  } else if (p.guion){
+    s.addShape(pres.ShapeType.roundRect, { x:6.1, y:0.35, w:2.7, h:4.8, fill:{ color:'3E4938' }, line:{ color:'3E4938' }, rectRadius:0.15 });
+    s.addText('REEL · guion', { x:6.3, y:0.55, w:2.3, h:0.3, fontFace:F, fontSize:10, bold:true, color:'EA733D', margin:0 });
+    s.addText(p.guion.split('\n').filter(x => x.trim()).map(l => ({ text:l, options:{ breakLine:true, paraSpaceAfter:8 } })),
+      { x:6.3, y:0.95, w:2.3, h:3.9, fontFace:F, fontSize:10.5, color:'FFFFFF', valign:'top', margin:0, fit:'shrink' });
+  } else if (sl.length === 1 || !sl.length){
+    s.addShape(pres.ShapeType.rect, { x:5.53, y:0.35, w:3.84, h:4.8, fill:{ color:'EDE7E0' }, line:{ color:'C1B2A2' } });
+    s.addText(sl[0] || 'Pieza por diseñar o grabar', { x:5.63, y:0.45, w:3.64, h:4.6, fontFace:F, fontSize:10, bold:true, color:'3E4938', valign:'top', margin:0 });
+  } else if (sl.length === 2){
+    [[5.52,0.35],[7.49,0.35]].forEach(([x,y],k) => {
+      s.addShape(pres.ShapeType.rect, { x, y, w:1.89, h:2.36, fill:{ color: k ? 'EDE7E0' : '3E4938' }, line:{ color: k ? 'C1B2A2' : '3E4938' } });
+      s.addText(sl[k], { x:x+0.1, y:y+0.1, w:1.69, h:2.16, fontFace:F, fontSize: k ? 10 : 12, bold:true, color: k ? '3E4938' : 'FFFFFF', valign: k ? 'top' : 'middle', align: k ? 'left' : 'center', margin:0, fit:'shrink' });
+    });
+  } else {
+    sl.slice(0,6).forEach((t,k) => {
+      const x = [5.3,6.76,8.22][k % 3], y = k < 3 ? 0.98 : 2.79;
+      s.addShape(pres.ShapeType.rect, { x, y, w:1.38, h:1.73, fill:{ color: k ? 'EDE7E0' : '3E4938' }, line:{ color: k ? 'C1B2A2' : '3E4938' } });
+      s.addText(t, { x:x+0.1, y:y+0.1, w:1.18, h:1.52, fontFace:F, fontSize: k ? 10 : 12, bold:true, color: k ? '3E4938' : 'FFFFFF', valign:'middle', align:'center', margin:0, fit:'shrink' });
+    });
+  }
+  return s;
+}
+
+// ── Instalación y arranque ───────────────────────────────────────
+function yaInstalada(){ return window.matchMedia('(display-mode: standalone)').matches || window.navigator.standalone === true; }
+let _prompt = null;
+window.addEventListener('beforeinstallprompt', ev => { ev.preventDefault(); _prompt = ev; $('btn-instalar').classList.remove('oculto'); $('instalar-texto').textContent = 'Tocá Instalar y queda como una aplicación más.'; });
+async function instalar(){ if (!_prompt) return; _prompt.prompt(); try{ await _prompt.userChoice; }catch(e){} _prompt = null; $('btn-instalar').classList.add('oculto'); }
+window.addEventListener('appinstalled', () => $('caja-instalar').classList.add('oculto'));
+setTimeout(() => { if (_prompt || yaInstalada()) return; const esIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  $('instalar-texto').innerHTML = esIOS ? 'En iPhone: tocá <b>Compartir</b> abajo y después <b>Agregar a inicio</b>.' : 'Si no aparece el botón: menú <b>⋮</b> del navegador → <b>Instalar aplicación</b>.'; }, 2500);
+if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('sw.js').catch(e => console.warn('sw', e)));
+document.addEventListener('visibilitychange', () => {
+  if (document.visibilityState !== 'visible' || !USUARIO) return;
+  if (PANT === 'planes') cargarPlanes(); else if (PANT === 'plan' && PLAN) abrirPlan(PLAN.id, true);
+});
+(async function(){
+  if (!supa){ mostrar('login'); return; }
+  try{ const { data } = await supa.auth.getSession(); if (data && data.session){ USUARIO = data.session.user ? data.session.user.email : ''; arrancar(); return; } }catch(e){}
+  mostrar('login');
+})();
+</script>
+</body>
+</html>
